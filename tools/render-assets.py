@@ -6,28 +6,46 @@
 from pathlib import Path
 import math
 import sys
+import json
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMP = Path('/private/tmp/veilbound-sprites')
-SIZES = {'player': (192, 256), 'duelist': (192, 256), 'archer': (192, 256), 'warden': (192, 256), 'boss': (256, 320)}
+SIZES = {'player': (384, 320), 'duelist': (192, 256), 'archer': (192, 256), 'warden': (192, 256), 'boss': (256, 320)}
+PLAYER_STATES = [('idle',6,8,True),('run',12,24,True),('jump',3,16,False),('fall',3,10,True),('land',3,24,False),('attack1',6,30,False),('attack2',6,30,False),('attack3',7,28,False),('dash',4,24,False),('cast',6,22,False),('hurt',3,20,False)]
+PLAYER_FRAMES = [(state, frame, count) for state,count,_,_ in PLAYER_STATES for frame in range(count)]
+
+def animation_manifest():
+    start=0
+    states={}
+    for state,count,fps,loop in PLAYER_STATES:
+        states[state]={'start':start,'frames':count,'fps':fps,'loop':loop}
+        start+=count
+    return {'player':{'frameW':384,'frameH':320,'columns':12,'anchor':{'x':192,'y':296},'states':states}}
 
 if '--stitch' in sys.argv:
     from PIL import Image
     for name, (width, height) in SIZES.items():
-        sheet = Image.new('RGBA', (width * 8, height))
-        for frame in range(8):
+        if '--player-only' in sys.argv and name != 'player':
+            continue
+        if '--enemies-only' in sys.argv and name=='player':
+            continue
+        count=len(PLAYER_FRAMES) if name=='player' else 8
+        columns=12 if name=='player' else 8
+        sheet = Image.new('RGBA', (width * columns, height * math.ceil(count/columns)))
+        for frame in range(count):
             with Image.open(TEMP / f'{name}-{frame:02}.png') as image:
                 image = image.convert('RGBA')
                 assert image.size == (width, height), f'{name}: wrong frame size'
                 left, top, right, bottom = image.getchannel('A').getbbox()
                 assert 0 < left < right < width and 0 < top < bottom < height, f'{name}: clipped model'
-                sheet.paste(image, (width * frame, 0))
+                sheet.paste(image, (width * (frame%columns), height*(frame//columns)))
         sheet.save(ROOT / 'assets' / f'{name}.png', optimize=True)
-        print(f'{name}: {sheet.size}, 8 frames, RGBA', flush=True)
+        print(f'{name}: {sheet.size}, {count} frames, RGBA', flush=True)
+    (ROOT/'assets'/'animations.json').write_text(json.dumps(animation_manifest(),indent=2)+'\n')
     sys.exit(0)
 
 import bpy
-from mathutils import Vector
+from mathutils import Vector, Matrix
 
 TEMP.mkdir(parents=True, exist_ok=True)
 (ROOT / 'assets').mkdir(exist_ok=True)
@@ -163,7 +181,7 @@ def sword(hand, angle=.38, length=1.1, magic=False):
     mesh('diamond forged sword',verts,[(0,2,4),(2,1,4),(1,3,4),(3,0,4)],ruby if magic else steel_light)
     tube(guard+direction*.09+Vector((0,-.028,0)),end-direction*.16+Vector((0,-.015,0)),.013,.003,ruby if magic else steel,'sword fuller',vertices=5)
 
-def face_and_hair(base, silver=True, phase=0, boss=False, hood=False):
+def face_and_hair(base, silver=True, phase=0, boss=False, hood=False, flow=0, lean=0):
     h=hair_white if silver else hair_dark
     ellipsoid((0,0,base),(.175,.14,.23),face_light,'adult feminine face',segments=16)
     ellipsoid((-.065,0,base+.075),(.185,.17,.19),h,'hair crown',segments=16)
@@ -181,8 +199,13 @@ def face_and_hair(base, silver=True, phase=0, boss=False, hood=False):
     chain([(-.08,-.07,base+.20),(.035,-.128,base+.18),(.095,-.144,base+.115)],[.12,.075,.007],h,'swept fringe')
     if silver:
         for side in (-1,1):
-            flow=.045*math.sin(phase+side)
-            chain([(-.14,side*.08,base+.13),(-.30,side*.09,base-.04),(-.43+flow,side*.105,base-.30),(-.51+flow,side*.11,base-.65),(-.63+flow,side*.08,base-.92)],[.11,.12,.10,.055,.003],h,'long silver ponytail')
+            wave=.045*math.sin(phase+side)
+            root=Vector((-.14,side*.08,base+.13))
+            strand=[]
+            for t in (0,.20,.40,.70,1):
+                delta=Vector(((-.49-.74*flow)*t,side*.025*math.sin(t*math.pi),(-1.05+.86*min(flow,1))*t+wave*t*t))
+                strand.append(root+Matrix.Rotation(-lean,3,'Y') @ delta)
+            chain(strand,[.11,.12,.10,.055,.003],h,'long silver ponytail')
         ellipsoid((-.22,0,base+.02),(.06,.19,.08),gold if boss else crimson,'ponytail clasp')
     else:
         for side in (-1,1):
@@ -198,6 +221,7 @@ def face_and_hair(base, silver=True, phase=0, boss=False, hood=False):
         ellipsoid((.164,0,base+.17),(.039,.042,.053),ruby,'crown ruby')
 
 def human(kind, phase, pose):
+    model_start=len(model_objects)
     is_boss = kind == 'boss'
     is_archer = kind == 'archer'
     is_warden = kind == 'warden'
@@ -225,6 +249,7 @@ def human(kind, phase, pose):
     robe(1.72+z, .34+z if is_boss else 1.22+z,1.38 if is_boss else .50,.19,torso_mat,fold_mat,phase,ywidth=.36 if is_boss else .28)
     if not is_archer:
         cloak(2.25+z,.31+z if is_boss else .65+z,phase,crimson if not is_warden else teal,width=.58 if is_boss else .40,sweep=.74 if is_boss else .46)
+    leg_start=len(model_objects)
     for side in (-1,1):
         step=math.sin(phase+(0 if side == -1 else math.pi))
         if attack or dodge:
@@ -232,19 +257,20 @@ def human(kind, phase, pose):
         if is_boss:
             step *= .15
         hip=(0,side*.13,1.53+z)
-        knee=(.20*step,side*.14,.68 if dodge else .95+z+.06*max(0,step))
-        foot=(.35*step,side*.15,.23 if attack or dodge else .23+.13*max(0,-step))
+        knee=(.36*step,side*.14,.68 if dodge else .95+z+.25*max(0,-step))
+        foot=(.62*step,side*.15,.23 if attack or dodge else .23+.40*max(0,-step))
         tube(hip,knee,.12,.094,navy if not is_duelist else purple,'fitted trouser thigh')
         ellipsoid(knee,(.11,.11,.13),steel if is_warden else leather,'knee armor')
         tube(knee,foot,.088,.058,leather,'armored boot shaft')
         ellipsoid((foot[0]+.065,foot[1],foot[2]-.08),(.16,.10,.105),steel if is_warden else leather,'heeled armored boot')
         tube((foot[0]+.01,foot[1]-.09,foot[2]+.07),(knee[0]+.015,knee[1]-.09,knee[2]-.10),.017,.023,gold if is_boss else steel,'boot shin trim',vertices=6)
+    leg_end=len(model_objects)
     # Camera sees the right arm at negative Y; ready weapon stance across the body.
     hand=(.41+.025*math.sin(phase),-.29,1.66+z)
     if attack:
-        hand=(.52,-.34,2.12+z)
+        hand=(.65,-.34,1.94+z)
     elif windup:
-        hand=(.23,-.35,2.27+z)
+        hand=(.04,-.35,2.06+z)
     elif dodge:
         hand=(.30,-.34,1.24)
     if is_archer:
@@ -267,7 +293,7 @@ def human(kind, phase, pose):
         chain([(.0,-.23,2.29+z),(-.30,-.28,2.35+z),(-.61,-.31,2.25+z),(-.93,-.31,2.31+z+.10*math.sin(phase))],[.072,.065,.045,.003],crimson,'long flying scarf')
         sword(hand,-.74 if attack else -.08 if dodge else .15+.11*math.sin(phase),1.08)
     elif is_duelist:
-        sword(hand,-.86 if attack else .90 if windup else .32+.13*math.sin(phase),.92 if windup else 1.08,magic=True)
+        sword(hand,-.67 if attack else 1.72 if windup else .12+.22*math.sin(phase),.92 if windup else 1.08,magic=True)
         ellipsoid((-.16,-.02,1.72+z),(.095,.18,.10),gold,'duelist belt ornament')
     elif is_archer:
         center=Vector(hand)+Vector((.09,0,0))
@@ -286,7 +312,7 @@ def human(kind, phase, pose):
         for i in range(4):
             tube((-.32+i*.025,.15,2.16+z),(-.40+i*.04,.15,2.5+z),.009,.009,gold,'spare arrow',vertices=6)
     elif is_warden:
-        sword(hand,-.74 if attack else .90 if windup else .75,.92 if windup else 1.04)
+        sword(hand,-.67 if attack else 1.72 if windup else .75,.92 if windup else 1.04)
         verts=[(.27,.20,2.08+z),(.33,.43,1.92+z),(.33,.43,1.38+z),(.28,.22,1.17+z),(.22,-.01,1.38+z),(.22,-.01,1.92+z)]
         mesh('warden kite shield',verts,[(0,1,2,3,4,5)],teal)
         for a,b in zip(verts,verts[1:]+verts[:1]):
@@ -305,7 +331,6 @@ def human(kind, phase, pose):
         chain(curve,[.021,.018,.015,.010,.001],ruby,'ruby crescent edge')
         ellipsoid((.56,-.29,3.34+z),(.11,.068,.095),ruby,'scythe ruby eye')
         if attack or windup:
-            from mathutils import Matrix
             bpy.context.view_layer.update()
             pivot=Vector(hand)
             transform=Matrix.Translation(pivot) @ Matrix.Rotation(.72 if attack else -.55,4,'Y') @ Matrix.Translation(-pivot)
@@ -316,6 +341,119 @@ def human(kind, phase, pose):
             chain([(-.12,side*.19,2.54+z),(-.19,side*.28,2.13+z),(-.26,side*.29,1.68+z),(-.32,side*.31,1.24+z)],[.08,.10,.06,.003],hair_white,'queen long hair')
         for side in (-1,1):
             tube((.11,side*.22,1.57+z),(.24,side*.34,.44+z),.014,.013,gold,'gown embroidered seam',vertices=6)
+    if not is_boss:
+        bpy.context.view_layer.update()
+        pivot=Vector((0,0,1.65+z))
+        lean=.26 if attack else -.10 if windup else .16+.04*math.sin(phase)
+        transform=Matrix.Translation(pivot) @ Matrix.Rotation(lean,4,'Y') @ Matrix.Translation(-pivot)
+        for i,obj in enumerate(model_objects[model_start:],start=model_start):
+            if not leg_start<=i<leg_end:
+                obj.matrix_world=transform @ obj.matrix_world
+
+def player_pose(state, frame, count):
+    t=frame/max(1,count-1)
+    phase=frame*math.tau/count
+    pose={'bob':.025*math.sin(phase),'lean':.05,'frontK':(.10,.91),'frontA':(.20,.17),'backK':(-.13,.87),'backA':(-.30,.17),
+          'hand':(.45,1.62),'elbow':(.18,1.88),'offhand':(.05,1.62),'offelbow':(-.16,1.87),'sword':.12,'flow':.15,'phase':phase}
+    if state=='run':
+        pose.update(bob=.05*math.cos(phase*2),lean=.32+.06*math.sin(phase),flow=1.0)
+        for label,angle in [('front',phase),('back',phase+math.pi)]:
+            lift=max(0,math.sin(angle))
+            pose[label+'K']=(.43*math.cos(angle)+.12,.90+.30*lift)
+            pose[label+'A']=(.82*math.cos(angle),.16+.60*lift)
+        pose.update(hand=(.32+.26*math.sin(phase),1.57-.20*math.sin(phase)),elbow=(.04+.14*math.sin(phase),1.93),
+                    offhand=(.10-.43*math.sin(phase),1.60+.28*math.sin(phase)),offelbow=(-.10-.18*math.sin(phase),1.93),sword=-.45+.23*math.sin(phase))
+    elif state=='jump':
+        pose.update(bob=.02,lean=[-.16,.12,.22][frame],frontK=(.43,1.20),frontA=(.19,.82),backK=(-.31,1.01),backA=(-.58,.70),
+                    hand=(.58,1.93),elbow=(.24,2.18),offhand=(-.31,2.05),offelbow=(-.33,2.21),sword=.45,flow=.8)
+    elif state=='fall':
+        pose.update(lean=.13,frontK=(.23,.97),frontA=(.32,.20),backK=(-.25,1.13),backA=(-.50,.55),
+                    hand=(.63,2.04),elbow=(.32,2.25),offhand=(-.36,2.10),offelbow=(-.34,2.27),sword=.64,flow=.65)
+    elif state=='land':
+        squash=[1,.55,.10][frame]
+        pose.update(bob=-.40*squash,lean=.48*squash,frontK=(.50,.64+.25*(1-squash)),frontA=(.50,.15),backK=(-.33,.68),backA=(-.52,.15),
+                    hand=(.57,1.40),elbow=(.30,1.79),sword=-.20,flow=.9*squash)
+    elif state.startswith('attack'):
+        data={
+            'attack1':{'hands':[(.13,2.12),(-.20,2.30),(.75,2.07),(.92,1.72),(.68,1.43),(.47,1.64)],'angles':[2.0,2.57,.26,-.27,-.72,.12],'leans':[-.17,-.28,.23,.42,.25,.08]},
+            'attack2':{'hands':[(.48,1.43),(.18,1.22),(.81,1.38),(.92,2.06),(.45,2.33),(.48,1.65)],'angles':[-1.15,-1.68,-.24,.57,1.15,.12],'leans':[.08,-.17,.22,.36,.14,.07]},
+            'attack3':{'hands':[(.23,2.07),(.03,2.43),(.05,2.43),(.86,1.55),(.76,1.20),(.60,1.36),(.46,1.63)],'angles':[1.45,1.59,1.80,-.46,-.30,-.31,.12],'leans':[-.05,-.17,-.27,.55,.46,.30,.06]},
+        }[state]
+        reach=[.0,.0,.55,.80,.70,.38,.15][frame]
+        hand=data['hands'][frame]
+        pose.update(hand=hand,elbow=(hand[0]*.42,2.10 if hand[1]>1.9 else 1.80),sword=data['angles'][frame],lean=data['leans'][frame],
+                    bob=-.08 if frame>1 else .0,frontK=(.20+reach*.35,.87),frontA=(.28+reach*.62,.15),backK=(-.19-reach*.20,.81),backA=(-.42-reach*.35,.15),
+                    offhand=(-.31,1.74+.13*math.sin(phase)),offelbow=(-.38,2.04),flow=.90 if frame>1 else .38)
+        if state=='attack3' and frame in (3,4):
+            pose['bob']=-.33
+            pose['frontK']=(.62,.63)
+    elif state=='dash':
+        pose.update(bob=-.64,lean=.82+.05*math.sin(phase),frontK=(.63,.55),frontA=(.33,.15),backK=(-.43,.59),backA=(-.87,.20),
+                    hand=(.55,1.47),elbow=(.28,1.82),offhand=(-.48,1.75),offelbow=(-.33,2.02),sword=-.29,flow=1.30)
+    elif state=='cast':
+        reach=math.sin(t*math.pi)
+        pose.update(lean=.12+.14*reach,frontA=(.46,.16),backA=(-.45,.16),hand=(.25,2.05+.25*reach),elbow=(.08,2.23),sword=1.35,
+                    offhand=(.31+.63*reach,1.90+.18*reach),offelbow=(.30+.30*reach,2.17),flow=.5+.3*reach)
+    elif state=='hurt':
+        recoil=[1,.55,.1][frame]
+        pose.update(lean=-.30*recoil,bob=-.10*recoil,frontK=(.32,.94),frontA=(.48,.22),backK=(-.18,.82),backA=(-.43,.16),
+                    hand=(.10,1.67),elbow=(-.11,1.95),offhand=(-.28,2.10),offelbow=(-.35,2.20),sword=.88,flow=-.40*recoil)
+    return pose
+
+def animated_player(state, frame, count):
+    p=player_pose(state,frame,count)
+    bob,phase,flow=p['bob'],p['phase'],p['flow']
+    pivot=Vector((0,0,1.51))
+    upper_start=len(model_objects)
+    ellipsoid((0,0,1.55),(.20,.25,.22),navy,'mobile armored hips')
+    tube((0,0,1.55),(0,0,2.11),.16,.225,navy,'fitted adventurer coat',vertices=12)
+    for side in (-1,1):
+        ellipsoid((.035,side*.105,1.99),(.165,.11,.125),navy_light,'tailored chest panel')
+        tube((-.015,side*.15,2.14),(.035,side*.105,1.64),.021,.017,steel,'silver coat piping',vertices=6)
+        tube((.06,side*.18,1.99),(.09,side*.15,1.76),.013,.009,gold,'buckled coat straps',vertices=6)
+    tube((0,0,2.11),(0,0,2.33),.082,.070,skin,'neck')
+    ellipsoid((0,0,1.57),(.215,.264,.060),leather,'waist belt')
+    ellipsoid((.215,-.018,1.58),(.026,.06,.067),gold,'engraved belt buckle')
+    ellipsoid((.243,-.018,1.58),(.018,.032,.037),ruby,'belt garnet')
+    robe(1.59,1.24,.35,.19,navy,navy_light,phase,ywidth=.275)
+    # Short split coat and long scarf expose the leg silhouette during sprinting.
+    cloak(2.16,1.12,phase,crimson,width=.30,sweep=.35+.63*max(0,flow))
+    for side in (-1,1):
+        shoulder=(0,side*.25,2.12)
+        elbow_x,elbow_z=p['elbow'] if side==-1 else p['offelbow']
+        hand_x,hand_z=p['hand'] if side==-1 else p['offhand']
+        elbow=(elbow_x,side*.31,elbow_z)
+        hand=(hand_x,side*.34,hand_z)
+        ellipsoid(shoulder,(.16,.13,.115),steel,'articulated shoulder armor')
+        ellipsoid((-.035,side*.277,2.14),(.12,.11,.085),navy_light,'pauldron layered inset')
+        tube(shoulder,elbow,.079,.061,navy,'bent upper sleeve')
+        ellipsoid(elbow,(.070,.071,.070),steel,'elbow cap')
+        tube(elbow,hand,.061,.047,leather,'leather forearm glove')
+        cuff=Vector(hand)*.75+Vector(elbow)*.25
+        tube(cuff,hand,.065,.052,steel,'engraved wrist bracer',vertices=8)
+        ellipsoid(hand,(.074,.059,.069),skin,'gripping hand')
+        if side==-1:
+            sword(hand,p['sword']+p['lean'],.94)
+    face_and_hair(2.53,silver=True,phase=phase,flow=flow,lean=p['lean'])
+    ellipsoid((.01,0,2.22),(.15,.242,.066),crimson,'red neck scarf')
+    chain([(.0,-.235,2.22),(-.30,-.28,2.27+.06*flow),(-.64-.18*flow,-.31,2.18+.13*flow),(-1.03-.42*flow,-.31,2.27+.16*flow+.13*math.sin(phase+.5))],[.065,.06,.040,.001],crimson,'wind whipped scarf')
+    bpy.context.view_layer.update()
+    upper_transform=Matrix.Translation(Vector((0,0,bob))+pivot) @ Matrix.Rotation(p['lean'],4,'Y') @ Matrix.Translation(-pivot)
+    for obj in model_objects[upper_start:]:
+        obj.matrix_world=upper_transform @ obj.matrix_world
+    for side,label in [(-1,'front'),(1,'back')]:
+        knee_x,knee_z=p[label+'K']
+        ankle_x,ankle_z=p[label+'A']
+        hip=(0,side*.145,1.48+bob)
+        knee=(knee_x,side*.153,knee_z)
+        ankle=(ankle_x,side*.165,ankle_z)
+        tube(hip,knee,.113,.083,navy_light,'dynamic fitted thigh')
+        ellipsoid(knee,(.094,.090,.097),steel,'flexing knee guard')
+        tube(knee,ankle,.081,.055,leather,'jointed high boot')
+        foot=ellipsoid((ankle_x+.065,side*.165,ankle_z-.072),(.17,.092,.083),leather,'pointed armored boot')
+        foot.rotation_euler.y=.24*max(0,ankle_z-.2)
+        tube((ankle_x+.02,side*.165-.083,ankle_z+.03),(knee_x+.015,side*.153-.09,knee_z-.09),.017,.020,steel,'silver boot shin plate',vertices=6)
+        ellipsoid((ankle_x+.105,side*.165,ankle_z-.07),(.105,.096,.026),steel,'boot toe cap')
 
 def light(name, location, energy, color, size):
     data=bpy.data.lights.new(name,'AREA')
@@ -339,18 +477,36 @@ camera_data.type='ORTHO'
 camera.location=(6,-13,4.25)
 
 for kind,(width,height) in SIZES.items():
+    if '--player-only' in sys.argv and kind!='player':
+        continue
+    if '--enemies-only' in sys.argv and kind=='player':
+        continue
     scene.render.resolution_x=width
     scene.render.resolution_y=height
-    camera_data.ortho_scale=4.35 if kind == 'boss' else 3.57
-    target=Vector((.15,0,1.79 if kind == 'boss' else 1.54))
+    camera_data.ortho_scale=4.72 if kind=='player' else 4.35 if kind == 'boss' else 3.57
+    camera.location=(2.5,-16,3.55) if kind=='player' else (6,-13,4.25)
+    target=Vector((0 if kind=='player' else .15,0,1.73 if kind=='player' else 1.79 if kind == 'boss' else 1.54))
     camera.rotation_euler=(target-camera.location).to_track_quat('-Z','Y').to_euler()
-    for frame in (range(6,8) if '--combat' in sys.argv else range(8)):
+    if kind=='player':
+        from bpy_extras.object_utils import world_to_camera_view
+        bpy.context.view_layer.update()
+        ground=world_to_camera_view(scene,camera,Vector((0,0,.055)))
+        camera.location+=camera.rotation_euler.to_matrix() @ Vector(((ground.x-.5)*camera_data.ortho_scale,(296-(1-ground.y)*height)*camera_data.ortho_scale/width,0))
+    total=len(PLAYER_FRAMES) if kind=='player' else 8
+    frames=range(total) if kind=='player' else range(6,8) if '--combat' in sys.argv else range(8)
+    for frame in frames:
+        if '--preview' in sys.argv and kind=='player' and frame not in (0,6,9,12,18,24,29,35,42,48,54,57):
+            continue
         for obj in model_objects:
             bpy.data.objects.remove(obj,do_unlink=True)
         model_objects.clear()
-        human(kind,frame*math.tau/8,frame)
+        if kind=='player':
+            state,local,count=PLAYER_FRAMES[frame]
+            animated_player(state,local,count)
+        else:
+            human(kind,frame*math.tau/8,frame)
         if kind == 'player' and frame == 0:
             bpy.ops.wm.save_as_mainfile(filepath=str(ROOT/'assets'/'characters.blend'))
         scene.render.filepath=str(TEMP/f'{kind}-{frame:02}.png')
         bpy.ops.render.render(write_still=True)
-        print(f'FINISHED {kind} {frame+1}/8',flush=True)
+        print(f'FINISHED {kind} {frame+1}/{total}',flush=True)

@@ -5,3 +5,6 @@ node_modules/
 artifacts/
 assets/frames/
 *.blend1
+
+__pycache__/
+*.pyc

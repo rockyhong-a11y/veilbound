@@ -1,0 +1,79 @@
+{
+  "player": {
+    "frameW": 384,
+    "frameH": 320,
+    "columns": 12,
+    "anchor": {
+      "x": 192,
+      "y": 296
+    },
+    "states": {
+      "idle": {
+        "start": 0,
+        "frames": 6,
+        "fps": 8,
+        "loop": true
+      },
+      "run": {
+        "start": 6,
+        "frames": 12,
+        "fps": 24,
+        "loop": true
+      },
+      "jump": {
+        "start": 18,
+        "frames": 3,
+        "fps": 16,
+        "loop": false
+      },
+      "fall": {
+        "start": 21,
+        "frames": 3,
+        "fps": 10,
+        "loop": true
+      },
+      "land": {
+        "start": 24,
+        "frames": 3,
+        "fps": 24,
+        "loop": false
+      },
+      "attack1": {
+        "start": 27,
+        "frames": 6,
+        "fps": 30,
+        "loop": false
+      },
+      "attack2": {
+        "start": 33,
+        "frames": 6,
+        "fps": 30,
+        "loop": false
+      },
+      "attack3": {
+        "start": 39,
+        "frames": 7,
+        "fps": 28,
+        "loop": false
+      },
+      "dash": {
+        "start": 46,
+        "frames": 4,
+        "fps": 24,
+        "loop": false
+      },
+      "cast": {
+        "start": 50,
+        "frames": 6,
+        "fps": 22,
+        "loop": false
+      },
+      "hurt": {
+        "start": 56,
+        "frames": 3,
+        "fps": 20,
+        "loop": false
+      }
+    }
+  }
+}
