@@ -10,12 +10,13 @@ A free, original gothic 2D action roguelite for the web. Play an adult female sw
 | --- | --- | --- |
 | Move | A/D or ←/→ | Drag the left side |
 | Jump / double jump | Space, W or ↑; press again in the air | Swipe upward; a second upward swipe jumps again |
-| Three-hit sword combo | Hold J or F | Tap or hold the right side |
+| Attack with the active weapon | Hold J or F | Tap or hold the right side |
+| Select / switch carried weapon | 1 / 2 or X | Tap either weapon slot |
 | Invulnerable dodge | K or Shift | Swipe sideways on the right |
-| 혈월의 검기 — traveling sword wave | R | Double-tap the right side or tap its skill icon |
-| 공허의 폭풍 — nearby blast and projectile counter | T | Tap its skill icon |
+| First equipped skill | R | Double-tap the right side or tap its skill icon |
+| Second equipped skill | T | Tap its skill icon |
 | Ground slam / drop through a ledge | ↓ or S | Swipe downward |
-| Open a chest / use a nearby door | E | Tap the contextual interaction button |
+| Open a chest / inspect dropped gear / use a nearby portal | E | Tap nearby dropped gear or the interaction button |
 | Heal | Q | Tap the potion icon |
 | Exploration map | M | Tap the minimap |
 | Pause | P or Esc | Tap pause |
@@ -24,13 +25,28 @@ The downward action slams while airborne and drops through one-way ledges while 
 
 Find each region's **봉인 문양** (sigil) on the high route and defeat its **guardian** to unlock the exit. Ordinary enemies remain optional. Choose a blessing, then use the elevated exit to continue. Backtracking preserves opened chests, broken walls and cleared gates. Coins, potions and relics reward side routes; secret chambers behind cracked walls contain bonuses that last until the run ends.
 
-On death or victory, collected embers return to the title screen and can upgrade your blade for the next run. Progress saves locally in your browser. Sound is opt-in with the music button. Portrait and landscape layouts are supported; landscape provides a wider view.
+Every ordinary enemy drops a weapon; every second kill also drops a skill. Treasure chests contain gear as well as a relic. Approach a drop and press E or tap it, then select one of the two replacement slots. Replaced gear stays on the floor. You carry **two weapons and two skills**. Weapon switching during an attack takes effect after recovery. The same skill cannot occupy both slots, and replacing a skill or changing regions preserves its remaining cooldown. Common, rare and epic gear have increasing power; gear level also increases damage and shield strength.
+
+On death or victory, collected embers return to the title screen and can upgrade all your weapons for the next run. Progress saves locally in your browser. Sound is opt-in with the music button. Portrait and landscape layouts are supported; landscape provides a wider view.
 
 ## Explore and fight
 
 The five handcrafted **4096×2048** maze biomes are the Ashen Cells, Drowned Aqueduct, Forbidden Archive, Glass Garden and Crimson Forge. Tall walls, low corridors, alternating ledges, vertical shafts and drop routes require climbing and descending instead of running along a flat floor. Optional upper routes lead to treasure, and the garden canopy provides a rewarding shortcut. The sixth region is the Hollow Cathedral boss arena, with recovery balconies and elevated platforms for avoiding attacks.
 
-Combat combines a three-hit advancing sword combo, double jumps, a fast dodge, two cooldown skills and an aerial ground slam. Hit pause, knockback, animated sword trails, impact flashes, screen shake and stone debris reinforce each strike. The heroine uses **59 Blender-rendered animation frames** for idle, sprint, jump, fall, landing, three attacks, dodge, casting and damage reactions. All five character models are adult women.
+Combat combines eight weapon families, double jumps, a fast dodge, two carried skills and an aerial ground slam. Hit pause, knockback, weapon trails, impact flashes, screen shake and stone debris reinforce each strike. Each weapon uses its own **59-frame Blender heroine atlas** for idle, sprint, jump, fall, landing, three attacks, dodge, casting and damage reactions. All five character models are adult women. Only the carried weapon atlases are loaded, keeping unused motion sheets out of browser memory.
+
+| Weapon | Fighting style |
+| --- | --- |
+| 월광검 · sword | Fast advancing three-hit cuts |
+| 파쇄 건틀릿 · gauntlet | Short-range rapid punches, heavy finishing knockback |
+| 백야의 창 · spear | Long narrow thrusts |
+| 잿빛 권총 · gun | Fast bullets, three-shot finishing burst |
+| 가시 활 · bow | Slower arrows that pierce multiple targets |
+| 심해 작살 · harpoon | Heavy projectile that drags enemies closer |
+| 황혼 대검 · greatsword | Slow broad cuts and heavy knockback |
+| 공허의 낫 · scythe | Circular cuts that hit behind you and inflict bleeding |
+
+The eight skills are 혈월의 검기 (piercing wave), 공허의 폭풍 (area blast and projectile counter), 낙성의 심판 (delayed meteor strikes), 서리의 숨결 (piercing freeze), 연쇄 번개 (four-target chain), 천 개의 칼날 (six-dagger fan), 심연의 사슬 (enemy pull), and 여명의 방벽 (four-second damage-absorbing shield). Each has a distinct effect, color, icon and cooldown.
 
 ## Develop
 
@@ -42,12 +58,12 @@ npm test       # physics, combos, skills, exploration, progression and boss chec
 npm run build  # static site in dist/
 ```
 
-The assertion suite covers solid terrain, jumping and falling, dodge collision, timed sword combos, both skills, slam impacts, touch destruction, fragment bounces, relics, sigil and guardian gates, backtracking and saved progression. Its full campaign follows the authored routes through all five mazes with active enemies, healing and recovery after falls, then survives all three boss phases using timed dodges and the production movement and combat rules.
+The assertion suite covers solid terrain, jumping and falling, dodge collision, timed combos, all eight weapons and skills, projectile range/piercing/pulling, bleeding/freezing/shields, physical drops, two-slot replacement, queued weapon switching, rarity scaling, persistent skill cooldowns, slam impacts, touch destruction, fragment bounces, relics, sigil and guardian gates, backtracking and saved progression. Its full campaign follows the authored routes through all five mazes with active enemies, healing and recovery after falls, then survives all three boss phases using timed dodges and the production movement and combat rules.
 
 GitHub Actions verifies the engine and publishes the static build to GitHub Pages on every push to `main`.
 
 ## Art
 
-All five adult female character models were modeled and rendered in Blender. The heroine has a 59-frame atlas, and each of the four other characters has eight frames. `assets/characters.blend` contains the source scene; `tools/render-assets.py` reproduces the sheets and `assets/animations.json` records the heroine's animation timing and foot anchor. The built-in image generator created the original gothic environments and cover. A Higgsfield batch was attempted but returned no confirmed generation result, so it was not repeated. Records and final prompts are stored beside the assets. See [`assets/ART-SOURCES.md`](assets/ART-SOURCES.md) and [`assets/higgsfield-provenance.json`](assets/higgsfield-provenance.json).
+All five adult female character models were modeled and rendered in Blender. The heroine has eight 59-frame weapon variants, and each of the four other characters has eight frames. `assets/characters.blend` contains the original source scene; `tools/render-assets.py` reproduces the base sheets and `assets/animations.json` records the heroine's animation timing and foot anchor. `tools/render-arsenal.py` renders the weapon variants and eight inventory icons. `tools/render-reliquary.py` renders the hinged treasure chest and the ornate portal's sealed and open loops. Their manifests record dimensions and anchors. The built-in image generator created the original gothic environments and cover. A Higgsfield batch was attempted but returned no confirmed generation result, so it was not repeated. Records and final prompts are stored beside the assets. See [`assets/ART-SOURCES.md`](assets/ART-SOURCES.md) and [`assets/higgsfield-provenance.json`](assets/higgsfield-provenance.json).
 
 This is a compact browser game with a six-region campaign. It does not claim the scale or exact mechanics of a commercial multi-year production.

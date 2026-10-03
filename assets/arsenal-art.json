@@ -1,0 +1,67 @@
+{
+  "version": 3,
+  "renderer": "Blender Cycles",
+  "original": true,
+  "frameW": 384,
+  "frameH": 320,
+  "columns": 12,
+  "rows": 5,
+  "frames": 59,
+  "anchor": {
+    "x": 192,
+    "y": 296
+  },
+  "animationManifest": "animations.json",
+  "weapons": {
+    "sword": {
+      "name": "Moonsteel blade",
+      "sprite": "player.png",
+      "icon": "arsenal-icon-sword.png"
+    },
+    "gauntlet": {
+      "name": "Ruby knuckles",
+      "sprite": "arsenal-gauntlet.png",
+      "icon": "arsenal-icon-gauntlet.png"
+    },
+    "spear": {
+      "name": "Dawnspire spear",
+      "sprite": "arsenal-spear.png",
+      "icon": "arsenal-icon-spear.png"
+    },
+    "gun": {
+      "name": "Nocturne pistol",
+      "sprite": "arsenal-gun.png",
+      "icon": "arsenal-icon-gun.png"
+    },
+    "bow": {
+      "name": "Gilded recurve",
+      "sprite": "arsenal-bow.png",
+      "icon": "arsenal-icon-bow.png"
+    },
+    "harpoon": {
+      "name": "Abyssal chain harpoon",
+      "sprite": "arsenal-harpoon.png",
+      "icon": "arsenal-icon-harpoon.png"
+    },
+    "greatsword": {
+      "name": "Cathedral greatsword",
+      "sprite": "arsenal-greatsword.png",
+      "icon": "arsenal-icon-greatsword.png"
+    },
+    "scythe": {
+      "name": "Crescent reaper",
+      "sprite": "arsenal-scythe.png",
+      "icon": "arsenal-icon-scythe.png"
+    }
+  },
+  "poses": {
+    "gauntlet": "alternating straight punches and uppercut",
+    "spear": "two-handed thrusts and low sweep",
+    "gun": "two-handed aim and recoil",
+    "bow": "draw, hold, release, and re-nock",
+    "harpoon": "barbed thrust and chain cast",
+    "greatsword": "two-handed overhead and broad heavy cuts",
+    "scythe": "hooking sweep and crescent overhead cut"
+  },
+  "source": "tools/render-arsenal.py"
+}

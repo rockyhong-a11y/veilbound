@@ -1,0 +1,54 @@
+{
+  "chest": {
+    "frameW": 256,
+    "frameH": 192,
+    "columns": 8,
+    "anchor": {
+      "x": 128,
+      "y": 174
+    },
+    "states": {
+      "closed": {
+        "start": 0,
+        "frames": 1,
+        "fps": 1,
+        "loop": false
+      },
+      "opening": {
+        "start": 0,
+        "frames": 8,
+        "fps": 14,
+        "loop": false
+      },
+      "opened": {
+        "start": 7,
+        "frames": 1,
+        "fps": 1,
+        "loop": false
+      }
+    }
+  },
+  "portal": {
+    "frameW": 256,
+    "frameH": 384,
+    "columns": 8,
+    "anchor": {
+      "x": 128,
+      "y": 366
+    },
+    "states": {
+      "sealed": {
+        "start": 0,
+        "frames": 8,
+        "fps": 12,
+        "loop": true
+      },
+      "open": {
+        "start": 8,
+        "frames": 8,
+        "fps": 12,
+        "loop": true
+      }
+    }
+  }
+}

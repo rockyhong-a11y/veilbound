@@ -1,4 +1,4 @@
-import { W, H, FLOOR, ROOM_DEFS, SKILLS, createRun, step, attack, jump, dash, heal, interact, chooseBoon, roomFor, skill, groundSlam, shatterAt } from './engine.js?v=2';
+import { W, H, FLOOR, ROOM_DEFS, SKILLS, WEAPONS, RARITIES, weaponFor, skillFor, switchWeapon, equipDrop, nearbyDrop, createRun, step, attack, jump, dash, heal, interact, chooseBoon, roomFor, skill, groundSlam, shatterAt } from './engine.js?v=3';
 
 const $ = id => document.getElementById(id);
 const canvas = $('game'), ctx = canvas.getContext('2d', { alpha:false });
@@ -10,9 +10,11 @@ let state = createRun(meta), started = false, paused = false, camera = 0, camera
 let lastTime = 0, uiAt = 0, bannerUntil = 0, lastMode = '', lastMessage = '', soundOn = false, audio, musicAt = 0, musicStep = 0;
 const keys = new Set(), pointers = new Map();
 const input = { move:0, attack:false, down:false }, images = {};
-let animations = {}, lastTap = { at:0, x:0, y:0 }, renderedScale = 1, cameraOffsetX = 0, cameraOffsetY = 0;
+let animations = {}, objectAnimations = {}, objectTimes = new WeakMap(), gearOpen = null, gearSession = 0, lootBusy = false, lastTap = { at:0, x:0, y:0 }, renderedScale = 1, cameraOffsetX = 0, cameraOffsetY = 0;
 const ambience = Array.from({ length:52 }, (_, i) => ({ x:(i * 431 + 73) % W, y:(i * 227 + 91) % H, size:i % 3 + .5, speed:9 + i % 23, phase:i * 1.71 }));
-const assetPaths = { prison:'assets/bg-prison.png', cathedral:'assets/bg-cathedral.png', cover:'assets/cover.png', player:'assets/player.png', duelist:'assets/duelist.png', archer:'assets/archer.png', warden:'assets/warden.png', boss:'assets/boss.png' };
+const weaponArt = new Map(), weaponLoads = new Map();
+const assetPaths = { chest:'assets/reliquary-chest.png', portal:'assets/reliquary-portal.png', prison:'assets/bg-prison.png', cathedral:'assets/bg-cathedral.png', cover:'assets/cover.png', player:'assets/player.png', duelist:'assets/duelist.png', archer:'assets/archer.png', warden:'assets/warden.png', boss:'assets/boss.png' };
+for(const spec of WEAPONS)assetPaths['icon_'+spec.id]=`assets/arsenal-icon-${spec.id}.png`;
 
 function save() {
   meta = { ...state.meta };
@@ -37,7 +39,7 @@ function enableAudio() {
   audio.resume().catch(() => {});
 }
 function sound(event) {
-  const tones = { attack:[170,.1,'sawtooth',.022,.3], hit:[90,.1,'triangle',.09,.4], hurt:[150,.18,'sawtooth',.035,.4], dash:[260,.17,'triangle',.03,.3], jump:[220,.1,'sine',.03,1.5], pickup:[660,.14,'sine',.025,1.5], heal:[440,.6,'sine',.04,1.5], kill:[120,.28,'triangle',.05,.4], clear:[330,.4,'sine',.05,2], choose:[440,.4,'sine',.04,2], dead:[110,1.2,'triangle',.055,.35], win:[440,1.5,'sine',.05,2], boss:[65,1.2,'sawtooth',.024,.7] };
+  const tones = { attack:[170,.1,'sawtooth',.022,.3], hit:[90,.1,'triangle',.09,.4], hurt:[150,.18,'sawtooth',.035,.4], dash:[260,.17,'triangle',.03,.3], jump:[220,.1,'sine',.03,1.5], pickup:[660,.14,'sine',.025,1.5], heal:[440,.6,'sine',.04,1.5], kill:[120,.28,'triangle',.05,.4], clear:[330,.4,'sine',.05,2], choose:[440,.4,'sine',.04,2], dead:[110,1.2,'triangle',.055,.35], win:[440,1.5,'sine',.05,2], boss:[65,1.2,'sawtooth',.024,.7], gun:[115,.075,'square',.035,.2], bow:[720,.13,'triangle',.025,.35], switch:[330,.08,'triangle',.022,1.5], equip:[520,.32,'sine',.04,2], ice:[1150,.4,'sine',.027,.6], thunder:[90,.22,'sawtooth',.04,2], meteor:[240,.5,'triangle',.027,.3], meteorHit:[48,.45,'triangle',.09,.4], fan:[950,.18,'triangle',.025,.3], grapnel:[360,.24,'square',.016,.45], ward:[480,.7,'sine',.03,1.5], block:[750,.14,'triangle',.04,.6] };
   if (tones[event]) tone(...tones[event]);
   if(['hit','kill','shatter','slamHit','skill','storm'].includes(event)){
     const hard=['kill','shatter','slamHit','storm'].includes(event);
@@ -67,12 +69,13 @@ $('upgrade').onclick = () => {
   const cost = 5 + (meta.power || 0) * 3;
   if ((meta.embers || 0) < cost || (meta.power || 0) >= 12) return;
   meta.embers -= cost; meta.power = (meta.power || 0) + 1;
-  state.meta = { ...meta }; save(); legacy(); sound('choose'); toast(`영구 검 강화 +${meta.power * 2} · 다음 여정에 적용됩니다.`);
+  state.meta = { ...meta }; save(); legacy(); sound('choose'); toast(`영구 무기 강화 +${meta.power * 2} · 다음 여정에 적용됩니다.`);
 };
-function startRun() {
-  state = createRun(meta); started = true; paused = false; mapOpen = false; lastMode = ''; lastRoom = -1; lastMessage = ''; cameraRoom = -1;
+async function startRun() {
+  if(!await loadWeaponArt('gun')){toast('무기 모션을 불러오지 못했습니다. 다시 시작해 주세요.');return;}
+  gearOpen=null;gearSession++;lootBusy=false;state = createRun(meta); trimWeaponArt(); started = true; paused = false; mapOpen = false; lastMode = ''; lastRoom = -1; lastMessage = ''; cameraRoom = -1; objectTimes = new WeakMap();
   menu.classList.add('hidden'); modal.classList.add('hidden'); $('hud').classList.remove('hidden'); $('map').classList.remove('hidden');
-  for(const id of ['heal','skills','minimap-button','objective'])$(id).classList.remove('hidden');
+  for(const id of ['heal','skills','weapons','minimap-button','objective'])$(id).classList.remove('hidden');
   keys.clear(); pointers.clear(); input.move = 0; input.attack = false; input.down = false;
   if (soundOn) enableAudio(); canvas.focus({ preventScroll:true }); save();
 }
@@ -87,7 +90,7 @@ function banner() {
   $('room-banner').classList.add('show'); bannerUntil = performance.now() + 2600;
 }
 function openModal(eyebrow, title, description, action, callback) {
-  $('modal').querySelector('.modal-body').classList.remove('map-modal');
+  $('modal').querySelector('.modal-body').classList.remove('map-modal','gear-modal');
   $('modal-eyebrow').textContent = eyebrow; $('modal-title').textContent = title; $('modal-description').textContent = description;
   $('modal-options').replaceChildren(); $('modal-options').className = '';
   $('modal-action').classList.remove('hidden'); $('modal-action').querySelector('span').textContent = action;
@@ -95,28 +98,30 @@ function openModal(eyebrow, title, description, action, callback) {
 }
 function pauseGame() {
   if (!started || state.mode !== 'playing') return;
+  if(gearOpen){closeGear();return;}
   paused = !paused; keys.clear(); input.move = 0; input.attack = false; pointers.clear();
-  if (paused) openModal('A MOMENT BETWEEN LIVES','칼날 사이의 숨','왼쪽 드래그: 이동 · 오른쪽 터치/누르기: 연속 검격\n위로 쓸기: 이중 점프 · 옆으로 쓸기: 회피 · 아래로 쓸기: 낙하 공격\n오른쪽 두 번 터치: 혈월의 검기 · 스킬 아이콘: 두 가지 스킬\n상자와 균열 벽을 터치해 부수고, 열쇠와 숨겨진 보물을 찾으세요.\nR/T 스킬 · ↓ 낙하 · E 상호작용 · M 탐험 지도 · Q 회복','여정 계속하기', pauseGame);
+  if (paused) openModal('A MOMENT BETWEEN LIVES','칼날 사이의 숨','왼쪽 드래그: 이동 · 오른쪽 터치/누르기: 장착 무기로 공격\n위로 쓸기: 이중 점프 · 옆으로 쓸기: 회피 · 아래로 쓸기: 낙하 공격\n오른쪽 두 번 터치: 첫 번째 스킬 · 아이콘으로 무기/스킬 사용\n상자와 균열 벽을 터치해 부수고, 열쇠와 숨겨진 보물을 찾으세요.\n1/2 무기 선택 · X 교체 · R/T 스킬 · ↓ 낙하 · E 장비/상호작용 · M 탐험 지도 · Q 회복','여정 계속하기', pauseGame);
   else { modal.classList.add('hidden'); canvas.focus({ preventScroll:true }); }
 }
 $('pause').onclick = pauseGame;
-$('context').onclick = () => { if (!paused) interact(state); };
+$('context').onclick = contextAction;
+for(let i=0;i<2;i++)$('weapon-'+i).onclick=()=>{if(started&&!paused)switchWeapon(state,i);};
 $('heal').onclick = () => { if (!paused) { if (!heal(state)) toast(state.player.flask ? '체력이 가득 찼습니다.' : '회복 물약이 없습니다.'); } };
 for(let i=0;i<2;i++)$('skill-'+i).onclick=()=>{if(!paused&&started)skill(state,i);};
 $('minimap-button').onclick=toggleMap;
 function toggleMap(){
-  if(!started||state.mode!=='playing')return;
+  if(!started||state.mode!=='playing'||gearOpen)return;
   if(mapOpen){mapOpen=false;paused=false;modal.classList.add('hidden');canvas.focus({preventScroll:true});return;}
   paused=true;mapOpen=true;keys.clear();pointers.clear();input.move=0;input.attack=false;input.down=false;
   openModal('THE PATH YOU HAVE WALKED',roomFor(state).name,'','지도로부터 돌아가기',toggleMap);
   modal.querySelector('.modal-body').classList.add('map-modal');
   const mapCanvas=document.createElement('canvas');mapCanvas.className='full-map';mapCanvas.width=960;mapCanvas.height=480;
-  const legend=document.createElement('p');legend.className='map-legend';legend.textContent='흰 점: 아리아 · 금빛 표식: 봉인 열쇠 · 붉은 점: 감시관 · 파란 문: 출구 · 빗금: 부서지는 벽';
+  const legend=document.createElement('p');legend.className='map-legend';legend.textContent='흰 점: 아리아 · 금: 문양 · 붉은 점: 감시관 · 청록: 출구 · 빗금: 균열 · 보라: 장비';
   $('modal-options').append(mapCanvas,legend);drawMap(mapCanvas,true);
 }
 function returnToMenu() {
   save(); started = false; paused = false; modal.classList.add('hidden'); menu.classList.remove('hidden');
-  for (const id of ['hud','map','boss-hud','context','heal','skills','objective','minimap-button']) $(id).classList.add('hidden');
+  for (const id of ['hud','map','boss-hud','context','heal','skills','weapons','objective','minimap-button']) $(id).classList.add('hidden');
   $('room-banner').classList.remove('show'); $('start-label').textContent = '다시, 운명을 쓰기'; legacy(); $('start').focus({ preventScroll:true });
 }
 function updateMode() {
@@ -128,7 +133,7 @@ function updateMode() {
     options.querySelector('button')?.focus({ preventScroll:true });
   } else if (state.mode === 'dead' || state.mode === 'won') {
     save(); const won=state.mode==='won';
-    openModal(won?'THE DAWN IS YOURS':'DEATH IS ONLY THE BEGINNING',won?'마침내, 새벽':'불씨는 남는다',`${won?'공허의 여왕이 쓰러졌습니다. 왕국의 밤이 끝났습니다.':'육신은 쓰러졌지만, 여정은 끝나지 않았습니다.'}\n${state.kills}명 처치 · ${state.room + 1}/6 구역 · ${formatTime(state.time)}\n남겨진 불씨 ${meta.embers} — 다음 생의 검을 강화하세요.${storageOK?'':'\n브라우저 저장을 사용할 수 없어 성장 기록은 이번 접속에만 유지됩니다.'}`,won?'다시 시작되는 전설':'다음 생으로',returnToMenu);
+    openModal(won?'THE DAWN IS YOURS':'DEATH IS ONLY THE BEGINNING',won?'마침내, 새벽':'불씨는 남는다',`${won?'공허의 여왕이 쓰러졌습니다. 왕국의 밤이 끝났습니다.':'육신은 쓰러졌지만, 여정은 끝나지 않았습니다.'}\n${state.kills}명 처치 · ${state.room + 1}/6 구역 · ${formatTime(state.time)}\n남겨진 불씨 ${meta.embers} — 다음 생의 무기를 강화하세요.${storageOK?'':'\n브라우저 저장을 사용할 수 없어 성장 기록은 이번 접속에만 유지됩니다.'}`,won?'다시 시작되는 전설':'다음 생으로',returnToMenu);
   }
 }
 function formatTime(t) { return `${Math.floor(t/60).toString().padStart(2,'0')}:${Math.floor(t%60).toString().padStart(2,'0')}`; }
@@ -144,13 +149,14 @@ function updateHUD(now) {
   $('boss-hud').classList.toggle('hidden',!boss||!state.bossActive);
   if(boss){$('boss-fill').style.width=`${boss.hp/boss.maxHp*100}%`;$('boss-phase').textContent=`공허의 여왕 · ${boss.stage}단계`;}
   const def=roomFor(state),room=state.rooms[state.room];
-  const nearby=(def.exits||[]).find(e=>p.x-65<e.x+e.w&&p.x+p.w+65>e.x&&p.y-30<e.y+e.h&&p.y+p.h+35>e.y);
-  const chest=(room.chests||[]).find(e=>!e.opened&&Math.hypot(p.x+p.w/2-e.x-e.w/2,p.y+p.h/2-e.y-e.h/2)<105);
-  $('context').classList.toggle('hidden',paused||state.mode!=='playing'||(!nearby&&!chest));
-  if(nearby||chest){$('context').firstChild.textContent=chest?'숨겨진 보물 열기 ':nearby.locked&&!room.cleared?'봉인된 문 ':'통로 이동 ';$('context').style.right='4%';$('context').style.left='auto';}
+  const nearby=nearbyExit(),activeGate=nearby&&(!nearby.locked||room.cleared);
+  const drop=nearbyDrop(state);
+  const chest=nearbyChest();
+  $('context').classList.toggle('hidden',paused||state.mode!=='playing'||(!nearby&&!chest&&!drop));
+  if(nearby||chest||drop){$('context').firstChild.textContent=chest?'숨겨진 보물 열기 ':activeGate?'포탈 이동 ':drop?`${drop.kind==='weapon'?'무기':'스킬'} 살펴보기 `:nearby.locked&&!room.cleared?'봉인된 문 ':'통로 이동 ';$('context').style.right='4%';$('context').style.left='auto';}
   const guards=room.enemies.filter(e=>e.guardian&&!e.dead).length;
   $('objective-label').textContent=state.room===5?'공허의 여왕을 쓰러뜨리세요':!room.keyCollected?'봉인 열쇠를 찾으세요':guards?`열쇠 획득 · 감시관 ${guards}명 남음`:'봉인 해제 · 열린 출구로 향하세요';
-  for(let i=0;i<2;i++){const button=$('skill-'+i),cooldown=p.skillCooldowns?.[i]||0;button.classList.toggle('ready',cooldown<=0);button.querySelector('b').textContent=cooldown>0?Math.ceil(cooldown):'';button.querySelector('small').textContent=SKILLS[i].name;button.setAttribute('aria-label',`${SKILLS[i].name} ${cooldown>0?`${Math.ceil(cooldown)}초 후 사용 가능`:'사용'}`);}
+  updateLoadoutHUD();
   drawMap($('minimap'));
   $('heal').style.opacity=p.flask&&p.hp<p.maxHp?'1':'.45';
   if(state.message!==lastMessage&&state.messageTimer>0){lastMessage=state.message;toast(state.message);}
@@ -158,13 +164,13 @@ function updateHUD(now) {
 }
 
 window.addEventListener('keydown',e=>{
-  if(e.code==='Tab'&&!modal.classList.contains('hidden')){const buttons=[...modal.querySelectorAll('button:not(.hidden)')];const first=buttons[0],last=buttons.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}return;}
-  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space','KeyJ','KeyK','KeyQ','KeyE','KeyR','KeyT','KeyM'].includes(e.code)&&started)e.preventDefault();
+  if(e.code==='Tab'&&!modal.classList.contains('hidden')){const buttons=[...modal.querySelectorAll('button:not(.hidden):not(:disabled)')];const first=buttons[0],last=buttons.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}return;}
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space','KeyJ','KeyK','KeyQ','KeyE','KeyR','KeyT','KeyM','Digit1','Digit2','KeyX'].includes(e.code)&&started)e.preventDefault();
   if(e.code==='KeyM'){if(!e.repeat)toggleMap();return;}
-  if(e.code==='Escape'||e.code==='KeyP'){if(!e.repeat){if(mapOpen)toggleMap();else pauseGame();}return;}
+  if(e.code==='Escape'||e.code==='KeyP'){if(!e.repeat){if(gearOpen)closeGear();else if(mapOpen)toggleMap();else pauseGame();}return;}
   if(!started||paused||state.mode!=='playing')return;
   keys.add(e.code);
-  if(!e.repeat){if(['Space','ArrowUp','KeyW'].includes(e.code))requestJump();if(['KeyK','ShiftLeft','ShiftRight'].includes(e.code))dash(state);if(e.code==='KeyQ')heal(state);if(e.code==='KeyE')interact(state);if(e.code==='KeyR')skill(state,0);if(e.code==='KeyT')skill(state,1);if(['ArrowDown','KeyS'].includes(e.code))groundSlam(state);}
+  if(!e.repeat){if(['Space','ArrowUp','KeyW'].includes(e.code))requestJump();if(['KeyK','ShiftLeft','ShiftRight'].includes(e.code))dash(state);if(e.code==='KeyQ')heal(state);if(e.code==='KeyE')contextAction();if(e.code==='Digit1')switchWeapon(state,0);if(e.code==='Digit2')switchWeapon(state,1);if(e.code==='KeyX')switchWeapon(state);if(e.code==='KeyR')skill(state,0);if(e.code==='KeyT')skill(state,1);if(['ArrowDown','KeyS'].includes(e.code))groundSlam(state);}
 });
 window.addEventListener('keyup',e=>keys.delete(e.code));
 window.addEventListener('blur',()=>{keys.clear();pointers.clear();input.move=0;input.attack=false;if(started&&!paused&&state.mode==='playing')pauseGame();});
@@ -175,7 +181,10 @@ canvas.addEventListener('pointerdown',e=>{
   e.preventDefault();canvas.setPointerCapture(e.pointerId);const r=canvas.getBoundingClientRect();
   const left=e.clientX-r.left<r.width*.46;
   pointers.set(e.pointerId,{x:e.clientX,y:e.clientY,startX:e.clientX,startY:e.clientY,left,used:false,at:performance.now()});
-  const point=screenToWorld(e.clientX,e.clientY);shatterAt(state,point.x,point.y);
+  const point=screenToWorld(e.clientX,e.clientY),player=state.player;
+  const drop=state.rooms[state.room].gearDrops.find(d=>!d.collected&&Math.hypot(d.x+d.w/2-player.x-player.w/2,d.y+d.h/2-player.y-player.h/2)<110&&point.x>=d.x-18&&point.x<=d.x+d.w+18&&point.y>=d.y-30&&point.y<=d.y+d.h+18);
+  if(drop){pointers.delete(e.pointerId);openGear(drop);return;}
+  shatterAt(state,point.x,point.y);
   if(left){$('touch-ring').style.left=`${e.clientX-r.left}px`;$('touch-ring').style.top=`${e.clientY-r.top}px`;$('touch-ring').classList.remove('hidden');}
   else{const now=performance.now();if(now-lastTap.at<280&&Math.hypot(e.clientX-lastTap.x,e.clientY-lastTap.y)<55){skill(state,0);lastTap.at=0;}else{attack(state);lastTap={at:now,x:e.clientX,y:e.clientY};}}
 });
@@ -188,6 +197,73 @@ canvas.addEventListener('pointermove',e=>{
 });
 function release(e){pointers.delete(e.pointerId);input.down=false;if(![...pointers.values()].some(p=>p.left))$('touch-ring').classList.add('hidden');}
 canvas.addEventListener('pointerup',release);canvas.addEventListener('pointercancel',release);
+
+const skillPaths={crimson:'M6 23C28 21 30 4 15 3C24 9 25 15 6 23Z M5 26L28 3',storm:'M17 2L6 18H14L11 30L26 12H18Z',meteor:'M3 4L17 18M11 2L24 15M2 12L14 24M22 17A7 7 0 1 0 22 31A7 7 0 1 0 22 17',ice:'M16 2V30M4 9L28 23M4 23L28 9M12 5L16 9L20 5M12 27L16 23L20 27M5 14L10 13L10 8M22 24L22 19L27 18',thunder:'M19 2L9 13H17L12 29L25 12H18M3 7L6 9M28 25L31 27',fan:'M16 27L4 6L8 4L16 27L16 3L20 4L16 27L27 6L30 8L16 27M12 27H20',grapnel:'M3 29L22 10M20 3L29 4L29 13M22 10L30 2M8 19L14 25M5 24L9 28',ward:'M16 2L28 8V18C28 25 16 31 16 31C16 31 4 25 4 18V8Z M10 17L15 22L23 12'};
+function skillIcon(id){return `<svg viewBox="0 0 34 34" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${skillPaths[id]||skillPaths.crimson}"/></svg>`;}
+const canvasSkillPaths=Object.fromEntries(Object.entries(skillPaths).map(([id,d])=>[id,new Path2D(d)]));
+function imageLoad(path){return new Promise(resolve=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>resolve(null);im.src=path+'?v=3';});}
+function loadWeaponArt(type){
+  if(type==='sword')return Promise.resolve(images.player||null);
+  if(weaponArt.has(type))return Promise.resolve(weaponArt.get(type));
+  if(weaponLoads.has(type))return weaponLoads.get(type);
+  const loading=imageLoad(`assets/arsenal-${type}.png`).then(im=>{if(im)weaponArt.set(type,im);return im;}).finally(()=>weaponLoads.delete(type));weaponLoads.set(type,loading);return loading;
+}
+function trimWeaponArt(){const kept=new Set(state.player.weapons.map(w=>w.type));if(gearOpen?.kind==='weapon')kept.add(gearOpen.type);for(const type of weaponArt.keys())if(!kept.has(type))weaponArt.delete(type);}
+function updateLoadoutHUD(){
+  const p=state.player;
+  for(let i=0;i<2;i++){
+    const w=weaponFor(state,i),button=$('weapon-'+i),rarity=RARITIES[w.rarity]||RARITIES.common;
+    button.classList.toggle('selected',p.activeWeapon===i);button.classList.toggle('pending',p.pendingWeapon===i);button.setAttribute('aria-pressed',String(p.activeWeapon===i));button.style.setProperty('--loot-color',rarity.color);
+    button.querySelector('small').textContent=w.short;button.querySelector('b').textContent=`${w.level}`;
+    if(button.dataset.type!==w.type){button.querySelector('img').src=`assets/arsenal-icon-${w.type}.png?v=3`;button.dataset.type=w.type;}
+    button.setAttribute('aria-label',`${i+1}번 무기 ${w.name} ${rarity.name} ${w.level}레벨 ${p.pendingWeapon===i?'공격 후 전환':p.activeWeapon===i?'장착 중':'선택'}`);button.title=`${w.name} · ${rarity.name} Lv.${w.level}\n${w.description}\n기본 위력 ${Math.round(state.damage*w.damageMultiplier)} · ${i+1} / X`;
+    const spec=skillFor(state,i),skillButton=$('skill-'+i),cooldown=p.skillCooldowns?.[i]||0;
+    skillButton.classList.toggle('ready',cooldown<=0);skillButton.querySelector('b').textContent=cooldown>0?Math.ceil(cooldown):'';skillButton.querySelector('small').textContent=spec.short;
+    if(skillButton.dataset.type!==spec.id){skillButton.querySelector('span').innerHTML=skillIcon(spec.id);skillButton.dataset.type=spec.id;}
+    const skillRarity=RARITIES[spec.rarity]||RARITIES.common;
+    skillButton.style.setProperty('--skill-color',spec.color);skillButton.setAttribute('aria-label',`${spec.name} ${skillRarity.name} ${spec.level}레벨 ${cooldown>0?`${Math.ceil(cooldown)}초 후 사용 가능`:'사용'}`);skillButton.title=`${spec.name} · ${skillRarity.name} Lv.${spec.level} · ${spec.cooldown}초\n${spec.description}\n위력 ${Math.round(spec.multiplier*100)}%`;
+  }
+}
+function nearbyExit(){const p=state.player;return roomFor(state).exits.find(e=>p.x-65<e.x+e.w&&p.x+p.w+65>e.x&&p.y-30<e.y+e.h&&p.y+p.h+35>e.y);}
+function nearbyChest(){const p=state.player;return state.rooms[state.room].chests.find(c=>!c.opened&&Math.hypot(c.x+c.w/2-p.x-p.w/2,c.y+c.h/2-p.y-p.h/2)<105);}
+function contextAction(){
+  if(!started||paused||state.mode!=='playing')return;
+  if(nearbyChest()){interact(state);return;}
+  const exit=nearbyExit();if(exit&&(!exit.locked||state.rooms[state.room].cleared)){interact(state);return;}
+  const drop=nearbyDrop(state);if(drop){openGear(drop);return;}
+  interact(state);
+}
+function closeGear(){gearOpen=null;gearSession++;lootBusy=false;trimWeaponArt();paused=false;modal.classList.add('hidden');canvas.focus({preventScroll:true});}
+function openGear(drop){
+  if(!started||state.mode!=='playing'||drop.collected)return;
+  gearOpen=drop;gearSession++;lootBusy=false;const session=gearSession;paused=true;mapOpen=false;keys.clear();pointers.clear();input.move=0;input.attack=false;input.down=false;$('touch-ring').classList.add('hidden');
+  const spec=(drop.kind==='weapon'?WEAPONS:SKILLS).find(s=>s.id===drop.type),rarity=RARITIES[drop.rarity]||RARITIES.common;
+  const strength=rarity.multiplier*(1+(Math.max(1,drop.level)-1)*.065),power=drop.kind==='weapon'?`기본 위력 ${Math.round(state.damage*spec.damage*strength)}`:`위력 ${Math.round(strength*100)}%`;
+  openModal(drop.kind==='weapon'?'A NEW EDGE TO YOUR STORY':'A NEW POWER AWAKENS',spec.name,'각각 두 개까지 장착합니다. 교체한 장비는 바닥에 남습니다.','그대로 두기',closeGear);
+  modal.querySelector('.modal-body').classList.add('gear-modal');const options=$('modal-options');options.className='gear-options';
+  const offer=document.createElement('div');offer.className='gear-offer';offer.style.setProperty('--loot-color',rarity.color);
+  const icon=document.createElement('div');icon.className='gear-offer-icon';
+  if(drop.kind==='weapon'){const img=document.createElement('img');img.src=`assets/arsenal-icon-${drop.type}.png?v=3`;img.alt='';icon.append(img);}else icon.innerHTML=skillIcon(drop.type);
+  const info=document.createElement('div'),eyebrow=document.createElement('small'),description=document.createElement('p');eyebrow.textContent=`${rarity.name} · Lv.${drop.level} · ${power}`;description.textContent=spec.description+(drop.kind==='skill'?` · 재사용 ${spec.cooldown}초`:'');info.append(eyebrow,description);offer.append(icon,info);options.append(offer);
+  const slots=document.createElement('div');slots.className='gear-slots';options.append(slots);
+  for(let i=0;i<2;i++){
+    const old=drop.kind==='weapon'?weaponFor(state,i):skillFor(state,i),b=document.createElement('button');b.className='gear-slot';b.setAttribute('aria-label',`${i+1}번 슬롯 ${old.name} 대신 ${spec.name} 장착`);
+    const duplicate=drop.kind==='skill'&&state.player.skills[1-i]===drop.type;
+    b.dataset.blocked=String(duplicate);b.disabled=duplicate;
+    const number=document.createElement('small'),title=document.createElement('strong'),detail=document.createElement('span'),action=document.createElement('em');number.textContent=`SLOT 0${i+1} · ${(RARITIES[old.rarity]||RARITIES.common).name} Lv.${old.level}`;title.textContent=old.name;detail.textContent=old.description;action.textContent=duplicate?'다른 슬롯에 장착 중':`${i+1}번에 장착 →`;b.append(number,title,detail,action);
+    b.onclick=async()=>{
+      if(lootBusy)return;lootBusy=true;const run=state,id=drop.id;for(const option of slots.children)option.disabled=true;action.textContent='장착하는 중…';
+      const art=drop.kind!=='weapon'||await loadWeaponArt(drop.type);
+      if(gearSession!==session||!gearOpen||gearOpen.id!==id||state!==run){trimWeaponArt();return;}
+      if(!art){lootBusy=false;for(const option of slots.children)option.disabled=option.dataset.blocked==='true';action.textContent=`${i+1}번에 장착 →`;toast('무기 이미지를 불러오지 못했습니다. 다시 선택해 주세요.');return;}
+      if(equipDrop(state,id,i)){if(drop.kind==='weapon')switchWeapon(state,i);trimWeaponArt();closeGear();updateLoadoutHUD();}
+      else{lootBusy=false;for(const option of slots.children)option.disabled=option.dataset.blocked==='true';action.textContent=`${i+1}번에 장착 →`;toast('이 장비를 장착할 수 없습니다.');}
+    };
+    slots.append(b);
+  }
+  slots.querySelector('button:not(:disabled)')?.focus({preventScroll:true});
+}
+
 function requestJump(){if(!jump(state))state.player.jumpBuffer=.13;}
 function readInput(){
   let move=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0),firing=keys.has('KeyJ')||keys.has('KeyF');
@@ -278,12 +354,41 @@ function breakable(b,time){
   }
   if(!b.broken&&Math.hypot(b.x-state.player.x,b.y-state.player.y)<240){ctx.fillStyle='#edce9277';ctx.font='10px sans-serif';ctx.textAlign='center';ctx.fillText(b.secret?'균열 · 터치':'터치로 파괴',x+w/2,y-12);}
 }
+function objectSprite(key,frame,x,foot,height,defaultConfig){
+  const im=images[key];if(!im)return false;
+  const config=objectAnimations[key]||defaultConfig,fw=config.frameW,fh=config.frameH,columns=config.columns,anchor=config.anchor,size=height/fh;
+  ctx.drawImage(im,(frame%columns)*fw,Math.floor(frame/columns)*fh,fw,fh,x-anchor.x*size,foot-anchor.y*size,fw*size,fh*size);return true;
+}
 function chest(c,time){
-  if(!visible(c,70))return;const x=c.x,y=c.y,w=c.w,h=c.h;
-  if(!c.opened)glow(x+w/2,y+h/2,75,'#dfba822b');
-  ctx.fillStyle=c.opened?'#332930':'#604742';ctx.fillRect(x,y+18,w,h-18);ctx.strokeStyle='#c6a774';ctx.lineWidth=3;ctx.strokeRect(x+1,y+19,w-2,h-20);
-  ctx.save();ctx.translate(x+w/2,y+19);if(c.opened)ctx.rotate(-.4);ctx.fillStyle='#74524b';ctx.fillRect(-w/2,-20,w,20);ctx.strokeStyle='#c6a774';ctx.strokeRect(-w/2,-20,w,20);ctx.restore();ctx.fillStyle='#e9d4a1';ctx.fillRect(x+w/2-4,y+13,8,13);
-  if(!c.opened){ctx.font='12px Georgia';ctx.textAlign='center';ctx.fillStyle='#dfc697';ctx.fillText('유물',x+w/2,y-9);}
+  if(!visible(c,100))return;const cx=c.x+c.w/2,foot=c.y+c.h;
+  if(!objectTimes.has(c))objectTimes.set(c,{opened:c.opened?time:null});
+  const animation=objectTimes.get(c);if(c.opened&&animation.opened===null)animation.opened=time;
+  const frame=c.opened?Math.min(7,1+Math.floor((time-animation.opened)*14)):0;
+  glow(cx,foot-35,c.opened?112:80,c.opened?'#f3d29230':'#b7975f23');
+  if(c.opened){
+    ctx.save();ctx.globalAlpha=.3+Math.sin(time*2)*.06;const g=ctx.createLinearGradient(cx,foot-12,cx,foot-140);g.addColorStop(0,'#f3d4939a');g.addColorStop(1,'#f3d49300');path([[cx-24,foot-23],[cx-54,foot-146],[cx+50,foot-146],[cx+25,foot-23]],g);ctx.restore();
+  }
+  if(!objectSprite('chest',frame,cx,foot,84,{frameW:256,frameH:192,columns:8,anchor:{x:128,y:174}})){
+    ctx.fillStyle='#3b3431';ctx.fillRect(c.x,c.y,c.w,c.h);ctx.strokeStyle='#a79165';ctx.strokeRect(c.x,c.y,c.w,c.h);
+  }
+  if(!c.opened){ctx.font='10px sans-serif';ctx.textAlign='center';ctx.fillStyle='#e6cd99';ctx.fillText('유물 보관함',cx,c.y-32);}
+}
+function portal(gate,time){
+  if(!visible(gate,180))return;
+  const {x,y,w,h}=gate,sealed=gate.locked&&!state.rooms[state.room].cleared,cx=x+w/2,foot=y+h;
+  const col=sealed?'#e875a5':'#9be9df';
+  glow(cx,foot-88,145,sealed?'#c6538323':'#64dcd331');
+  if(!objectSprite('portal',(sealed?0:8)+Math.floor(time*12)%8,cx,foot,197,{frameW:256,frameH:384,columns:8,anchor:{x:128,y:366}})){
+    ctx.strokeStyle=col;ctx.lineWidth=5;ctx.beginPath();ctx.ellipse(cx,foot-80,46,82,0,0,7);ctx.stroke();
+  }
+  ctx.save();ctx.translate(cx,foot-86);ctx.globalAlpha=sealed?.5:.75;
+  for(let i=0;i<9;i++){
+    const angle=time*(sealed?.25:.6)+i*Math.PI*2/9,xx=Math.cos(angle)*(sealed?44:54),yy=Math.sin(angle)*72;
+    ctx.fillStyle=col;ctx.fillRect(xx-1,yy-1,i%3===0?3:1.5,3);
+  }
+  if(!sealed){const g=ctx.createRadialGradient(0,0,9,0,0,76);g.addColorStop(0,'#e4fff50a');g.addColorStop(1,'transparent');ctx.fillStyle=g;ctx.fillRect(-76,-76,152,152);}
+  ctx.restore();
+  ctx.font='10px sans-serif';ctx.textAlign='center';ctx.fillStyle=col;ctx.fillText(sealed?'문양과 감시관의 봉인':gate.label||'다음 구역',cx,y-34);
 }
 function environment(time){
   const def=roomFor(state),room=state.rooms[state.room];
@@ -293,18 +398,11 @@ function environment(time){
   for(const r of def.platforms||[]){masonry(r.x,r.y,r.w,r.h,true);if(visible(r,70)&&r.w>240)candle(r.x+r.w-20,r.y-4,time);}
   for(const b of room.breakables)breakable(b,time);
   for(const c of room.chests)chest(c,time);
-  for(const gate of def.exits||[]){
-    if(!visible(gate,180))continue;
-    const {x,y,w,h}=gate,sealed=gate.locked&&!room.cleared,col=sealed?'#ba677f':'#b4f8e3';
-    glow(x+w/2,y+h/2,150,sealed?'#b554791c':'#a0efd933');ctx.fillStyle='#071019';ctx.fillRect(x,y,w,h);ctx.strokeStyle=sealed?'#946078':'#bdd2b4';ctx.lineWidth=4;ctx.strokeRect(x,y,w,h);ctx.fillStyle=sealed?'#41243888':'#77c3b342';ctx.fillRect(x+8,y+8,w-16,h-8);
-    ctx.strokeStyle=col;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x+w/2,y+20);ctx.lineTo(x+w/2+14,y+39);ctx.lineTo(x+w/2,y+58);ctx.lineTo(x+w/2-14,y+39);ctx.closePath();ctx.stroke();
-    if(sealed){ctx.strokeStyle='#ab71877a';ctx.lineWidth=4;for(let bx=x+16;bx<x+w-8;bx+=18){ctx.beginPath();ctx.moveTo(bx,y+62);ctx.lineTo(bx,y+h-3);ctx.stroke();}}
-    else{ctx.fillStyle='#d0ffed';for(let i=0;i<7;i++)ctx.fillRect(x+15+(i*31)%Math.max(20,w-30),y+h-((time*36+i*25)%h),2,4);}
-    ctx.font='12px sans-serif';ctx.textAlign='center';ctx.fillStyle=col;ctx.fillText(sealed?'봉인된 통로':gate.label||'다음 구역',x+w/2,y-15);
-  }
+  for(const gate of def.exits||[])portal(gate,time);
 }
 function sprite(kind,e,time,opacity=1){
-  const im=images[kind];if(!im||!visible(e,200))return;
+  const type=kind==='player'?(e.weaponType||weaponFor(state).type):null;
+  const im=kind==='player'?(type==='sword'?images.player:weaponArt.get(type)):images[kind];if(!im||!visible(e,200))return;
   const boss=kind==='boss',config=kind==='player'?animations.player:null;
   let fw=boss?256:192,fh=boss?320:256,sx=0,sy=0,anchorX=fw/2,anchorY=boss?288:fh-20,height=boss?205:kind==='warden'?133:kind==='archer'?108:kind==='duelist'?114:122;
   if(config&&im.width>=config.frameW*config.columns){
@@ -329,12 +427,24 @@ function shadow(e){
   ctx.save();ctx.globalAlpha=.5*Math.max(.15,1-distance/430);ctx.fillStyle='#020811';ctx.beginPath();ctx.ellipse(cx,ground+3,e.w*(.9+distance*.002),5,0,0,7);ctx.fill();ctx.restore();
 }
 function slashEffect(s){
-  const age=1-s.life/s.maxLife,r=s.radius||112;
-  ctx.save();ctx.translate(s.x,s.y);ctx.scale(s.facing, s.combo===2?-1:1);ctx.globalAlpha=(1-age)**.65;
-  const start=-1.5+age*.2,end=1.12+age*.55;
+  const age=1-s.life/s.maxLife,r=s.radius||112,type=s.weaponType||'sword';
+  ctx.save();ctx.translate(s.x,s.y);ctx.scale(s.facing, s.combo===2?-1:1);ctx.globalAlpha=(1-age)**.65;ctx.strokeStyle=s.color;ctx.fillStyle=s.color+'45';
+  if(type==='spear'){
+    const tip=r*1.7,spread=11*(1-age)+3;glow(tip*.7,0,55,s.color+'25');
+    path([[-25,-spread],[tip,0],[-25,spread],[20,0]],s.color+'55');ctx.lineWidth=4*(1-age)+1;ctx.beginPath();ctx.moveTo(-30,0);ctx.lineTo(tip,0);ctx.stroke();
+    ctx.strokeStyle='#fff9dc';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(22,0);ctx.lineTo(tip,0);ctx.stroke();
+    for(let i=0;i<3;i++){ctx.strokeStyle=s.color+'88';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(20+i*20,(i-1)*13);ctx.lineTo(tip-20,(i-1)*5);ctx.stroke();}ctx.restore();return;
+  }
+  if(type==='gauntlet'){
+    const punch=r*(.5+age*.45);glow(punch,0,r*.65,s.color+'45');
+    path([[-22,-15],[punch,-8],[punch+24,0],[punch,8],[-22,15]],s.color+'65');ctx.lineWidth=5*(1-age)+1;
+    ctx.beginPath();ctx.ellipse(punch,0,9+age*22,16+age*14,0,-1.8,1.8);ctx.stroke();ctx.strokeStyle='#fff7dc';ctx.lineWidth=3;
+    for(let i=0;i<4;i++){const yy=(i-1.5)*10;ctx.beginPath();ctx.moveTo(punch-65,yy);ctx.lineTo(punch+8,yy*.45);ctx.stroke();}ctx.restore();return;
+  }
+  const start=type==='scythe'?-2.8:-1.5+age*.2,end=type==='scythe'?2.6:1.12+age*.55;
   ctx.rotate(s.combo===3?-.45:-.18);
   ctx.fillStyle=s.color+'45';ctx.beginPath();ctx.arc(0,0,r,start,end);ctx.arc(0,0,r*(.54+age*.3),end,start,true);ctx.closePath();ctx.fill();
-  ctx.shadowBlur=reducedMotion?0:15;ctx.shadowColor=s.color;ctx.strokeStyle=s.color;ctx.lineWidth=(s.combo===3?16:11)*(1-age)+2;ctx.beginPath();ctx.arc(0,0,r,start,end);ctx.stroke();
+  ctx.shadowBlur=reducedMotion?0:15;ctx.shadowColor=s.color;ctx.strokeStyle=s.color;ctx.lineWidth=(type==='greatsword'?25:s.combo===3?16:11)*(1-age)+2;ctx.beginPath();ctx.arc(0,0,r,start,end);ctx.stroke();
   ctx.shadowBlur=0;ctx.strokeStyle='#ffffef';ctx.lineWidth=3;ctx.beginPath();ctx.arc(0,0,r+1,start+.15,end-.15);ctx.stroke();ctx.strokeStyle=s.color+'88';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(0,0,r+15,start+.2,end-.35);ctx.stroke();ctx.restore();
 }
 function characters(time){
@@ -349,17 +459,37 @@ function characters(time){
       else{const r=e.intent==='sweep'?330:e.intent==='lunge'?470:e.kind==='warden'?180:120,x=e.facing>0?e.x+e.w/2:e.x+e.w/2-r;ctx.fillStyle='#fa70992b';ctx.fillRect(x,e.y+e.h-16,r,16);ctx.fillStyle='#f2a6ac99';ctx.fillRect(x,e.y+e.h-2,r,2);}
     }
     sprite(e.kind,e,time);
+    if(e.freeze>0){glow(e.x+e.w/2,e.y+e.h/2,66,'#8de5ff26');ctx.strokeStyle='#b2f3ff99';ctx.lineWidth=2;path([[e.x-7,e.y+e.h],[e.x-12,e.y+17],[e.x+e.w/2,e.y-8],[e.x+e.w+10,e.y+21],[e.x+e.w+6,e.y+e.h]],'#99dff322');ctx.stroke();}
+    if(e.bleed>0){ctx.fillStyle='#ed789a';ctx.beginPath();ctx.ellipse(e.x+e.w/2,e.y-9,3,5,.2,0,7);ctx.fill();}
     if(e.phase==='attack'&&['melee','sweep'].includes(e.intent))slashEffect({x:e.x+e.w/2,y:e.y+e.h*.4,facing:e.facing,combo:1,radius:e.kind==='boss'?270:e.kind==='warden'?150:105,color:'#ed7aa5',life:.11,maxLife:.2});
     if(e.hp<e.maxHp&&e.kind!=='boss'){ctx.fillStyle='#061017';ctx.fillRect(e.x-12,e.y-18,e.w+24,4);ctx.fillStyle=e.guardian?'#d2ac73':'#dc8aa1';ctx.fillRect(e.x-12,e.y-18,(e.w+24)*e.hp/e.maxHp,4);}
     if(e.guardian){ctx.font='10px sans-serif';ctx.textAlign='center';ctx.fillStyle='#e3c599';ctx.fillText('◆ 감시관',e.x+e.w/2,e.y-30);}
   }
   shadow(p);
-  if(p.castTimer>0){glow(p.x+p.w/2,p.y+p.h*.5,110,'#df80aa2e');ctx.save();ctx.strokeStyle='#eb92cf77';ctx.lineWidth=2;ctx.translate(p.x+p.w/2,p.y+p.h*.4);ctx.rotate(time*6);ctx.beginPath();ctx.ellipse(0,0,76,34,.5,0,Math.PI*2);ctx.stroke();ctx.restore();}
+  if(p.castTimer>0){const col=SKILLS.find(s=>s.id===p.castSkill)?.color||'#df80aa';glow(p.x+p.w/2,p.y+p.h*.5,110,col+'2e');ctx.save();ctx.strokeStyle=col+'77';ctx.lineWidth=2;ctx.translate(p.x+p.w/2,p.y+p.h*.4);ctx.rotate(time*6);ctx.beginPath();ctx.ellipse(0,0,76,34,.5,0,Math.PI*2);ctx.stroke();ctx.restore();}
+  if(p.wardTimer>0){ctx.save();ctx.translate(p.x+p.w/2,p.y+p.h*.45);ctx.strokeStyle='#f6dc9caa';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(0,0,49,67,0,0,Math.PI*2);ctx.stroke();glow(0,0,85,'#f9d99218');ctx.rotate(time*.7);for(let i=0;i<6;i++){ctx.rotate(Math.PI/3);ctx.fillStyle='#f7e1aa';ctx.fillRect(47,-3,3,6);}ctx.restore();}
   if(p.slam){ctx.strokeStyle='#ffd09caa';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(p.x+p.w/2,p.y-75);ctx.lineTo(p.x+p.w/2,p.y+25);ctx.stroke();glow(p.x+p.w/2,p.y+p.h,65,'#ffb57455');}
   sprite('player',p,time);
   for(const s of state.slashes)slashEffect(s);
 }
+
+function gearDrops(time){
+  for(const drop of state.rooms[state.room].gearDrops||[]){
+    if(drop.collected||!visible(drop,180))continue;
+    const spec=(drop.kind==='weapon'?WEAPONS:SKILLS).find(s=>s.id===drop.type),rarity=RARITIES[drop.rarity]||RARITIES.common,col=drop.kind==='skill'?spec.color:rarity.color;
+    const x=drop.x+drop.w/2,y=drop.y+drop.h/2+Math.sin(time*3+drop.x)*3,foot=drop.y+drop.h;
+    ctx.save();const beam=ctx.createLinearGradient(x,foot,x,foot-125);beam.addColorStop(0,col+'55');beam.addColorStop(1,col+'00');ctx.fillStyle=beam;ctx.fillRect(x-13,foot-125,26,125);
+    glow(x,y,55,col+'30');ctx.strokeStyle=col+'99';ctx.lineWidth=1;ctx.beginPath();ctx.ellipse(x,foot+2,22,5,0,0,7);ctx.stroke();
+    if(drop.kind==='weapon'&&images['icon_'+drop.type])ctx.drawImage(images['icon_'+drop.type],x-30,y-32,60,60);
+    else{ctx.save();ctx.translate(x-17,y-17);ctx.strokeStyle=col;ctx.lineWidth=1.6;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke(canvasSkillPaths[drop.type]);ctx.restore();}
+    ctx.font='10px sans-serif';ctx.textAlign='center';ctx.fillStyle=col;ctx.fillText(spec.name,x,foot+20);
+    if(Math.hypot(x-state.player.x-state.player.w/2,y-state.player.y-state.player.h/2)<110){ctx.fillStyle='#fff3db';ctx.font='9px sans-serif';ctx.fillText('터치 / E · 두 슬롯 중 선택',x,foot+35);}
+    ctx.restore();
+  }
+}
+
 function pickups(time){
+  gearDrops(time);
   for(const item of state.rooms[state.room].items){
     if(item.collected||!visible({x:item.x-10,y:item.y-10,w:20,h:20},60))continue;
     const yy=item.y+Math.sin(time*3+item.x)*4,col=item.kind==='ember'?'#c6a1ff':item.kind==='gold'?'#dfbf7e':item.kind==='sigil'?'#eddb9d':'#afe7ae';glow(item.x,yy,item.kind==='sigil'?75:28,col+'35');
@@ -379,6 +509,26 @@ function impactEffect(effect){
     ctx.lineWidth=1;ctx.beginPath();ctx.arc(0,0,r*(.5+t*.5),0,7);ctx.stroke();
   }else if(effect.kind==='slam'){
     ctx.scale(1,.28);ctx.lineWidth=9*(1-t)+1;ctx.beginPath();ctx.arc(0,0,r*(.2+t*.8),0,7);ctx.stroke();ctx.lineWidth=2;ctx.beginPath();ctx.arc(0,0,r*(.1+t*.65),0,7);ctx.stroke();
+  }else if(effect.kind==='thunder'){
+    const dx=(effect.fromX??effect.x-100)-effect.x,dy=(effect.fromY??effect.y-150)-effect.y;
+    ctx.lineWidth=5*(1-t)+1;ctx.beginPath();ctx.moveTo(dx,dy);for(let i=1;i<9;i++){const v=i/8,jitter=i===8?0:Math.sin(i*17+effect.x)*22*(1-t);ctx.lineTo(dx*(1-v)+jitter,dy*(1-v)-jitter);}ctx.stroke();ctx.strokeStyle='#ffffe9';ctx.lineWidth=1.5;ctx.stroke();glow(0,0,60,effect.color+'55');
+  }else if(effect.kind==='freeze'){
+    glow(0,0,r*(.45+t*.6),effect.color+'25');
+    for(let i=0;i<8;i++){ctx.save();ctx.rotate(i*Math.PI/4+t*.2);const at=r*(.2+t*.75),size=20*(1-t)+4;path([[at-size,0],[at,-size*.45],[at+size,0],[at,size*.45]],effect.color+'70');ctx.stroke();ctx.restore();}
+    ctx.lineWidth=1;ctx.beginPath();ctx.arc(0,0,r*(.25+t*.75),0,7);ctx.stroke();
+  }else if(effect.kind==='meteor'){
+    glow(0,0,r*(.6+t*.5),effect.color+'50');const tail=330*(1-t);ctx.lineWidth=25*(1-t)+1;ctx.beginPath();ctx.moveTo(-tail*.55,-tail);ctx.lineTo(0,0);ctx.stroke();ctx.strokeStyle='#fff3c5';ctx.lineWidth=7*(1-t)+1;ctx.stroke();
+    ctx.scale(1,.3);ctx.strokeStyle=effect.color;ctx.lineWidth=11*(1-t)+1;ctx.beginPath();ctx.arc(0,0,r*(.2+t*.8),0,7);ctx.stroke();
+  }else if(effect.kind==='ward'){
+    const size=r*(.3+t*.45);glow(0,0,size,effect.color+'24');ctx.lineWidth=4*(1-t)+1;ctx.beginPath();for(let i=0;i<=6;i++){const a=i*Math.PI/3-Math.PI/2;ctx.lineTo(Math.cos(a)*size*.75,Math.sin(a)*size);}ctx.closePath();ctx.stroke();ctx.rotate(Math.PI/6);ctx.lineWidth=1;ctx.stroke();
+  }else if(effect.kind==='fan'){
+    for(let i=0;i<6;i++){ctx.save();ctx.rotate((i-2.5)*.2);const at=r*(.2+t*.8);path([[at+22,0],[at-18,-5],[at-8,0],[at-18,5]],effect.color+'aa');ctx.restore();}
+  }else if(effect.kind==='grapnel'){
+    ctx.rotate(t*2);for(let i=0;i<9;i++){ctx.save();ctx.rotate(i*Math.PI*2/9);ctx.beginPath();ctx.ellipse(r*(.2+t*.6),0,12,5,.5,0,7);ctx.stroke();ctx.restore();}
+  }else if(effect.kind==='gun'||effect.kind==='shoot'){
+    glow(0,0,r*.8,effect.color+'65');ctx.rotate(effect.x);for(let i=0;i<6;i++){ctx.rotate(Math.PI/3);path([[0,-4],[r*(1-t),0],[0,4]],i%2?'#fff6d6':effect.color+'a0');}
+  }else if(effect.kind==='gear'||effect.kind==='chest'){
+    ctx.lineWidth=1;ctx.beginPath();ctx.ellipse(0,0,r*(.3+t*.7),r*(.16+t*.25),0,0,7);ctx.stroke();for(let i=0;i<8;i++){ctx.save();ctx.rotate(i*Math.PI/4);const at=r*(.2+t*.7);path([[at,-6],[at+5,0],[at,6],[at-5,0]],effect.color+'aa');ctx.restore();}
   }else if(['key','heal','jump','cast','touch','shatter'].includes(effect.kind)){
     ctx.beginPath();ctx.arc(0,0,r*(.25+t*.75),0,7);ctx.stroke();if(effect.kind==='key'||effect.kind==='shatter')for(let i=0;i<10;i++){const a=i*Math.PI/5;ctx.beginPath();ctx.moveTo(Math.cos(a)*r*t*.7,Math.sin(a)*r*t*.7);ctx.lineTo(Math.cos(a)*r*(t*.8+.2),Math.sin(a)*r*(t*.8+.2));ctx.stroke();}
   }else{
@@ -387,11 +537,32 @@ function impactEffect(effect){
   ctx.restore();
 }
 function effects(time){
+  for(const mark of state.skillEffects||[]){
+    const progress=1-mark.life/mark.maxLife;
+    ctx.save();ctx.translate(mark.x,mark.y);ctx.strokeStyle=mark.color+'bb';ctx.fillStyle=mark.color+'18';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(0,0,mark.radius,mark.radius*.26,0,0,7);ctx.fill();ctx.stroke();
+    ctx.setLineDash([8,10]);ctx.beginPath();ctx.moveTo(-180,-360);ctx.lineTo(0,0);ctx.stroke();ctx.setLineDash([]);ctx.lineWidth=3;ctx.beginPath();ctx.ellipse(0,0,mark.radius*.75,mark.radius*.19,0,-Math.PI/2,progress*Math.PI*2-Math.PI/2);ctx.stroke();
+    const remaining=(1-progress)*350;glow(-remaining*.5,-remaining,38,mark.color+'55');path([[-remaining*.5-10,-remaining-12],[-remaining*.5+11,-remaining-4],[-remaining*.5+8,-remaining+10],[-remaining*.5-7,-remaining+12]],mark.color+'cc');ctx.restore();
+  }
   for(const shot of state.projectiles){
     if(!visible(shot,130))continue;
+    if(['harpoon','chainHook'].includes(shot.kind)){
+      const fromX=state.player.x+state.player.w/2,fromY=state.player.y+34,toX=shot.x+shot.w/2,toY=shot.y+shot.h/2,dx=toX-fromX,dy=toY-fromY,length=Math.hypot(dx,dy);
+      ctx.save();ctx.translate(fromX,fromY);ctx.rotate(Math.atan2(dy,dx));ctx.strokeStyle=shot.color+'88';ctx.lineWidth=1.4;const links=Math.min(45,Math.ceil(length/15));for(let i=0;i<links;i++){ctx.beginPath();ctx.ellipse(i*length/links,0,7,3,i%2?.15:0,0,7);ctx.stroke();}ctx.restore();
+    }
     ctx.save();ctx.translate(shot.x+shot.w/2,shot.y+shot.h/2);
     if(shot.kind==='wave'){
       ctx.scale(shot.facing||1,1);glow(0,0,95,'#ff5d962e');ctx.strokeStyle='#ff789b';ctx.lineWidth=13;ctx.shadowColor='#ff5685';ctx.shadowBlur=reducedMotion?0:18;ctx.beginPath();ctx.arc(-30,0,65,-1.25,1.25);ctx.stroke();ctx.strokeStyle='#fff3dc';ctx.lineWidth=3;ctx.stroke();ctx.shadowBlur=0;ctx.strokeStyle='#ff91c580';ctx.lineWidth=2;ctx.beginPath();ctx.arc(-42,0,75,-1.2,1.2);ctx.stroke();for(let i=0;i<4;i++){ctx.globalAlpha=.3-i*.05;ctx.fillStyle='#e96393';ctx.fillRect(-45-i*18,-45+i*26,36,2);}
+    }else if(shot.kind==='frost'){
+      glow(0,0,60,shot.color+'45');ctx.rotate(time*4);ctx.strokeStyle=shot.color;ctx.lineWidth=3;
+      for(let i=0;i<6;i++){ctx.rotate(Math.PI/3);ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(30,0);ctx.moveTo(18,0);ctx.lineTo(24,-7);ctx.moveTo(18,0);ctx.lineTo(24,7);ctx.stroke();}ctx.strokeStyle='#f2fcff';ctx.lineWidth=1;ctx.beginPath();ctx.arc(0,0,17,0,7);ctx.stroke();
+    }else if(shot.kind==='bullet'){
+      ctx.rotate(Math.atan2(shot.vy,shot.vx));glow(0,0,25,shot.color+'55');const trail=ctx.createLinearGradient(-75,0,12,0);trail.addColorStop(0,shot.color+'00');trail.addColorStop(1,shot.color);ctx.fillStyle=trail;ctx.fillRect(-75,-2,87,4);ctx.fillStyle='#fff8d7';ctx.fillRect(-4,-1,20,2);
+    }else if(shot.kind==='playerArrow'){
+      ctx.rotate(Math.atan2(shot.vy,shot.vx));ctx.strokeStyle=shot.color+'66';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(-60,0);ctx.lineTo(18,0);ctx.stroke();ctx.strokeStyle='#c8b79b';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-23,0);ctx.lineTo(17,0);ctx.stroke();path([[24,0],[12,-5],[12,5]],'#ecf7d7');path([[-23,0],[-32,-6],[-17,-4]],shot.color);path([[-23,0],[-32,6],[-17,4]],shot.color);
+    }else if(['harpoon','chainHook'].includes(shot.kind)){
+      ctx.rotate(Math.atan2(shot.vy,shot.vx));glow(0,0,34,shot.color+'25');ctx.strokeStyle='#dbe9de';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-24,0);ctx.lineTo(22,0);ctx.stroke();path([[30,0],[14,-8],[17,0],[14,8]],shot.color);ctx.strokeStyle=shot.color;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(12,-7);ctx.lineTo(8,-13);ctx.lineTo(24,-9);ctx.moveTo(12,7);ctx.lineTo(8,13);ctx.lineTo(24,9);ctx.stroke();
+    }else if(shot.kind==='bladeFan'){
+      ctx.rotate(Math.atan2(shot.vy,shot.vx));glow(0,0,22,shot.color+'22');path([[22,0],[-10,-4],[-5,0],[-10,4]],'#e9fffa');ctx.strokeStyle=shot.color;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-10,-6);ctx.lineTo(-10,6);ctx.moveTo(-11,0);ctx.lineTo(-22,0);ctx.stroke();ctx.strokeStyle=shot.color+'66';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(-70,0);ctx.lineTo(-24,0);ctx.stroke();
     }else{
       ctx.rotate(Math.atan2(shot.vy,shot.vx));ctx.strokeStyle=shot.color;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-20,0);ctx.lineTo(14,0);ctx.stroke();path([[22,0],[9,-5],[9,5]],'#f4d5e8');
     }
@@ -431,6 +602,7 @@ function drawMap(target,full=false){
   for(const exit of def.exits){g.fillStyle=exit.locked&&!room.cleared?'#9d6179':'#a1e5e1';g.fillRect(exit.x,exit.y,exit.w,exit.h);}
   for(const item of room.items)if(!item.collected&&item.kind==='sigil'){g.fillStyle='#ffdf87';g.beginPath();g.arc(item.x,item.y,full?22:28,0,7);g.fill();}
   for(const chest of room.chests)if(!chest.opened){g.fillStyle='#d8b790';g.fillRect(chest.x,chest.y,chest.w,chest.h);}
+  for(const drop of room.gearDrops||[])if(!drop.collected){g.fillStyle='#d6acff';g.beginPath();g.arc(drop.x+drop.w/2,drop.y+drop.h/2,23,0,7);g.fill();}
   for(const e of room.enemies)if(!e.dead){g.fillStyle=e.guardian?'#fc869c':'#b5677f';g.beginPath();g.arc(e.x+e.w/2,e.y+e.h/2,e.guardian?25:14,0,7);g.fill();}
   if(full){g.font='46px sans-serif';g.textAlign='center';g.fillStyle='#d0e0d0';for(const z of def.zones||[])if(known(z.x+z.w/2,z.y+z.h/2))g.fillText(z.label,z.x+z.w/2,z.y+z.h/2);}
   g.restore();
@@ -465,8 +637,10 @@ function frame(now){
 }
 legacy();resize();requestAnimationFrame(frame);
 await Promise.all([
-  ...Object.entries(assetPaths).map(([key,path])=>new Promise(resolve=>{const im=new Image();im.onload=()=>{images[key]=im;resolve();};im.onerror=()=>resolve();im.src=path+'?v=2';})),
-  fetch('assets/animations.json?v=2').then(r=>{if(!r.ok)throw new Error('manifest');return r.json();}).then(data=>{animations=data;}).catch(()=>{})
+  ...Object.entries(assetPaths).map(([key,path])=>new Promise(resolve=>{const im=new Image();im.onload=()=>{images[key]=im;resolve();};im.onerror=()=>resolve();im.src=path+'?v=3';})),
+  loadWeaponArt('gun'),
+  fetch('assets/reliquary-animations.json?v=3').then(r=>r.ok?r.json():{}).then(data=>{objectAnimations=data;}).catch(()=>{}),
+  fetch('assets/animations.json?v=3').then(r=>{if(!r.ok)throw new Error('manifest');return r.json();}).then(data=>{animations=data;}).catch(()=>{})
 ]);
-$('start').disabled=!images.player||!animations.player;$('start-label').textContent=$('start').disabled?'새로고침하여 다시 불러오기':'여정 시작하기';
+$('start').disabled=!images.player||!animations.player||!weaponArt.has('gun');$('start-label').textContent=$('start').disabled?'새로고침하여 다시 불러오기':'여정 시작하기';
 if($('start').disabled)toast('캐릭터 모션을 불러오지 못했습니다. 페이지를 새로고침하세요.');

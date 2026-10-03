@@ -1,11 +1,9 @@
 import { W, H, FLOOR, ROOM_DEFS } from './world.js?v=2';
 export { W, H, FLOOR, ROOM_DEFS } from './world.js?v=2';
+import { WEAPONS, SKILLS, RARITIES, weaponSpec, skillSpec } from './arsenal.js?v=3';
+export { WEAPONS, SKILLS, RARITIES } from './arsenal.js?v=3';
 
 export const MAP_CELL = 128;
-export const SKILLS = [
-  { id: 'crimson', name: '혈월의 검기', key: 'R', cooldown: 4.5, color: '#ff799a' },
-  { id: 'storm', name: '공허의 폭풍', key: 'T', cooldown: 9, color: '#b7a0ff' },
-];
 const ENEMY_STATS = {
   duelist: { name: '잿빛 검무사', hp: 112, w: 32, h: 90, damage: 11, speed: 154 },
   archer: { name: '침묵의 궁수', hp: 94, w: 32, h: 90, damage: 12, speed: 0 },
@@ -42,7 +40,7 @@ function impact(s, x, y, color = '#f6e2cf', radius = 85, kind = 'hit') {
 }
 function enemy(kind, x, surfaceY, extra = {}) {
   const spec = ENEMY_STATS[kind] || ENEMY_STATS.duelist;
-  return { ...spec, ...extra, kind, x, y: surfaceY - spec.h, hp: extra.hp || spec.hp, maxHp: extra.hp || spec.hp, facing: -1, phase: 'idle', intent: '', timer: .7, attackTimer: 0, hurt: 0, stagger: 0, dead: false, attacks: 0, stage: 1, vx: 0, vy: 0, onGround: true, homeX: x, homeY: surfaceY - spec.h, jumpCooldown: 0, hitPlayer: false, animTime: 0 };
+  return { ...spec, ...extra, kind, x, y: surfaceY - spec.h, hp: extra.hp || spec.hp, maxHp: extra.hp || spec.hp, facing: -1, phase: 'idle', intent: '', timer: .7, attackTimer: 0, hurt: 0, stagger: 0, dead: false, attacks: 0, stage: 1, vx: 0, vy: 0, onGround: true, homeX: x, homeY: surfaceY - spec.h, jumpCooldown: 0, hitPlayer: false, animTime: 0, freeze: 0, bleed: 0, bleedTick: 0, bleedDamage: 0, pull: null };
 }
 function makeRooms(s) {
   return ROOM_DEFS.map((def, index) => {
@@ -51,7 +49,7 @@ function makeRooms(s) {
     if (def.key && !items.some(item => item.kind === 'sigil')) items.push({ kind: 'sigil', ...def.key, amount: 1, collected: false });
     return {
       visited: index === 0, cleared: false, boonTaken: false, keyCollected: !items.some(item => item.kind === 'sigil'),
-      enemies, items, breakables: (def.breakables || []).map(b => ({ ...b, hp: b.hp ?? (b.kind === 'wall' || b.kind === 'rune' ? 60 : 1), maxHp: b.hp ?? (b.kind === 'wall' || b.kind === 'rune' ? 60 : 1), broken: false })),
+      enemies, items, gearDrops: [], breakables: (def.breakables || []).map(b => ({ ...b, hp: b.hp ?? (b.kind === 'wall' || b.kind === 'rune' ? 60 : 1), maxHp: b.hp ?? (b.kind === 'wall' || b.kind === 'rune' ? 60 : 1), broken: false })),
       chests: (def.chests || []).map(c => ({ w: 48, h: 35, ...c, opened: false })), explored: [], exploreCols: Math.ceil((def.width || W) / MAP_CELL), exploreRows: Math.ceil(H / MAP_CELL),
     };
   });
@@ -61,8 +59,8 @@ export function createRun(meta = {}) {
   const saved = { embers: nonnegative(meta.embers), best: Math.min(6, nonnegative(meta.best)), runs: nonnegative(meta.runs) + 1, power: Math.min(12, nonnegative(meta.power)) };
   const spawn = ROOM_DEFS[0].spawn || { x: ROOM_DEFS[0].spawnX || 160, y: FLOOR };
   const s = {
-    room: 0, rooms: [], player: { x: spawn.x, y: spawn.y - 90, w: 32, h: 90, vx: 0, vy: 0, facing: 1, hp: 120, maxHp: 120, onGround: true, jumps: 0, coyote: .1, jumpBuffer: 0, dropTimer: 0, attackTimer: 0, attackDuration: 0, attackPending: null, attackQueued: 0, combo: 0, comboWindow: 0, dashTimer: 0, dashCooldown: 0, invulnerable: 0, flask: 2, maxFlask: 3, skillCooldowns: [0, 0], castTimer: 0, slam: false, landingTimer: 0, hurtTimer: 0, anim: 'idle', animTime: 0, runDistance: 0 },
-    time: 0, mode: 'playing', particles: [], slashes: [], projectiles: [], impacts: [], damageTexts: [], trails: [], events: [], meta: saved,
+    room: 0, rooms: [], player: { x: spawn.x, y: spawn.y - 90, w: 32, h: 90, vx: 0, vy: 0, facing: 1, hp: 120, maxHp: 120, onGround: true, jumps: 0, coyote: .1, jumpBuffer: 0, dropTimer: 0, attackTimer: 0, attackDuration: 0, attackPending: null, attackQueued: 0, combo: 0, comboWindow: 0, dashTimer: 0, dashCooldown: 0, invulnerable: 0, flask: 2, maxFlask: 3, weapons: [{ id: 'starter-sword', type: 'sword', rarity: 'common', level: 1 }, { id: 'starter-gun', type: 'gun', rarity: 'common', level: 1 }], activeWeapon: 0, pendingWeapon: null, skills: ['crimson', 'storm'], skillGear: [{ type: 'crimson', rarity: 'common', level: 1 }, { type: 'storm', rarity: 'common', level: 1 }], cooldownsBySkill: {}, skillCooldowns: [0, 0], wardTimer: 0, wardHP: 0, castTimer: 0, slam: false, landingTimer: 0, hurtTimer: 0, anim: 'idle', animTime: 0, runDistance: 0 },
+    time: 0, mode: 'playing', gearSerial: 0, skillEffects: [], particles: [], slashes: [], projectiles: [], impacts: [], damageTexts: [], trails: [], events: [], meta: saved,
     kills: 0, gold: 0, embers: 0, boons: [], boonChoices: [], message: '높은 길에서 봉인 문양을 찾으세요. 금이 간 벽 너머에는 비밀이 있습니다.', messageTimer: 6,
     bossActive: false, bossDefeated: false, rewardDone: false, damage: 36 + saved.power * 2, attackCooldown: .29, moveSpeed: 390,
     rng: (nonnegative(meta.seed) || ((Date.now() ^ (saved.runs * 2654435761)) >>> 0)) || 1,
@@ -80,9 +78,82 @@ function finish(s, won) {
   if (won) { s.bossDefeated = true; s.bossActive = false; tell(s, '공허가 갈라졌다. 새로운 새벽은 당신의 것이다.', 99); emit(s, 'win'); }
   else { tell(s, '육신은 사라져도 불씨는 남는다.', 99); emit(s, 'dead'); }
 }
+export function weaponFor(s, slot = s.player.activeWeapon) {
+  const instance = s.player.weapons[slot];
+  if (!instance) return null;
+  const spec = weaponSpec(instance.type), multiplier = (RARITIES[instance.rarity]?.multiplier || 1) * (1 + (Math.max(1, instance.level) - 1) * .065);
+  return { ...spec, ...instance, slot, multiplier, damageMultiplier: spec.damage * multiplier };
+}
+export function skillFor(s, slot = 0) {
+  const id = s.player.skills[slot], spec = skillSpec(id);
+  if (!spec) return null;
+  const stored = s.player.skillGear[slot], gear = stored?.type === id ? stored : { type: id, rarity: 'common', level: 1 };
+  const multiplier = (RARITIES[gear.rarity]?.multiplier || 1) * (1 + (Math.max(1, gear.level) - 1) * .065);
+  return { ...spec, ...gear, slot, multiplier, damageMultiplier: multiplier, remaining: s.player.cooldownsBySkill[id] || 0 };
+}
+export function switchWeapon(s, slot) {
+  const p = s.player, next = slot === undefined ? ((p.pendingWeapon ?? p.activeWeapon) + 1) % 2 : slot;
+  if (s.mode !== 'playing' || !Number.isInteger(next) || next < 0 || next > 1 || !p.weapons[next]) return false;
+  if (next === p.activeWeapon) { const queued = p.pendingWeapon !== null; p.pendingWeapon = null; return queued; }
+  if (p.attackTimer > 0 || p.castTimer > 0) { p.pendingWeapon = next; emit(s, 'switchQueued'); return true; }
+  p.activeWeapon = next; p.pendingWeapon = null; p.combo = 0; p.comboWindow = 0; p.attackQueued = 0;
+  particles(s, center(p), p.y + 35, weaponFor(s).color, 10, 'ember', .6);
+  emit(s, 'switch'); return true;
+}
+function dropGear(s, kind, type, x, y, extra = {}) {
+  const spec = kind === 'weapon' ? WEAPONS.find(w => w.id === type) : skillSpec(type);
+  if (!spec) return null;
+  const drop = { id: `gear-${++s.gearSerial}`, kind, type, x: clamp(x - 22, 22, roomWidth(s) - 66), y: y - 44, w: 44, h: 44, vx: 0, vy: -130, onGround: false, rarity: 'common', level: s.room + 1, source: 'enemy', collected: false, ...extra };
+  s.rooms[s.room].gearDrops.push(drop);
+  impact(s, x, y - 25, RARITIES[drop.rarity]?.color || spec.color, 52, 'gear');
+  return drop;
+}
+function enemyGear(s, e) {
+  const weapons = ['gauntlet', 'spear', 'bow', 'harpoon', 'greatsword', 'scythe', 'gun', 'sword'];
+  const rarity = s.kills === 1 ? 'common' : e.guardian || random(s) > .91 ? 'epic' : random(s) > .52 ? 'rare' : 'common';
+  dropGear(s, 'weapon', weapons[(s.kills - 1) % weapons.length], center(e), e.y + e.h, { rarity });
+  if (s.kills % 2 === 0) {
+    const skills = ['meteor', 'ice', 'thunder', 'fan', 'grapnel', 'ward', 'crimson', 'storm'];
+    dropGear(s, 'skill', skills[(s.kills / 2 - 1) % skills.length], center(e) + 54, e.y + e.h, { rarity: e.guardian ? 'epic' : 'rare' });
+  }
+  tell(s, `${weaponSpec(weapons[(s.kills - 1) % weapons.length]).name} 드랍 · 가까이서 E 또는 장비를 터치하세요.`, 3);
+}
+export function nearbyDrop(s) {
+  const p = s.player;
+  return s.rooms[s.room].gearDrops.filter(d => !d.collected && Math.hypot(center(d) - center(p), d.y + d.h / 2 - p.y - p.h / 2) < 110)
+    .sort((a, b) => Math.hypot(center(a) - center(p), a.y + a.h / 2 - p.y - p.h / 2) - Math.hypot(center(b) - center(p), b.y + b.h / 2 - p.y - p.h / 2))[0] || null;
+}
+export function equipDrop(s, dropId, slot) {
+  if (s.mode !== 'playing' || !Number.isInteger(slot) || slot < 0 || slot > 1) return false;
+  const p = s.player, drop = s.rooms[s.room].gearDrops.find(d => d.id === dropId && !d.collected);
+  if (!drop || Math.hypot(center(drop) - center(p), drop.y + drop.h / 2 - p.y - p.h / 2) >= 110) return false;
+  if (drop.kind === 'weapon' && WEAPONS.some(w => w.id === drop.type)) {
+    const old = p.weapons[slot];
+    p.weapons[slot] = { id: drop.id, type: drop.type, rarity: drop.rarity, level: drop.level };
+    if (old) dropGear(s, 'weapon', old.type, center(p) - p.facing * 44, p.y + p.h, { rarity: old.rarity, level: old.level, source: 'replaced' });
+    if (slot === p.activeWeapon) { p.attackTimer = 0; p.attackPending = null; p.attackQueued = 0; p.combo = 0; p.comboWindow = 0; }
+  } else if (drop.kind === 'skill' && skillSpec(drop.type)) {
+    const old = p.skills[slot], oldGear = p.skillGear[slot], other = 1 - slot;
+    // One ability cannot occupy both slots and bypass its cooldown.
+    if (p.skills[other] === drop.type) { tell(s, '이미 다른 슬롯에 장착한 스킬입니다.'); return false; }
+    p.skills[slot] = drop.type; p.skillGear[slot] = { type: drop.type, rarity: drop.rarity, level: drop.level };
+    if (old) dropGear(s, 'skill', old, center(p) - p.facing * 44, p.y + p.h, { source: 'replaced', rarity: oldGear?.type === old ? oldGear.rarity : 'common', level: oldGear?.type === old ? oldGear.level : 1 });
+    p.skillCooldowns = p.skills.map(id => p.cooldownsBySkill[id] || 0);
+  } else return false;
+  drop.collected = true;
+  particles(s, center(p), p.y + 35, (drop.kind === 'weapon' ? weaponSpec(drop.type) : skillSpec(drop.type)).color, 20, 'ember');
+  tell(s, `${drop.kind === 'weapon' ? weaponSpec(drop.type).name : skillSpec(drop.type).name} · ${slot + 1}번 슬롯에 장착했습니다.`, 3);
+  emit(s, 'equip'); return true;
+}
 function hurtPlayer(s, damage, knock = 0) {
   const p = s.player;
   if (s.mode !== 'playing' || p.invulnerable > 0 || p.dashTimer > 0) return false;
+  if (p.wardTimer > 0 && p.wardHP > 0) {
+    const absorbed = Math.min(damage, p.wardHP); p.wardHP -= absorbed; damage -= absorbed;
+    impact(s, center(p), p.y + 36, '#f4da9c', 105, 'ward'); emit(s, 'block');
+    if (p.wardHP <= 0) p.wardTimer = 0;
+    if (damage <= 0) return true;
+  }
   p.hp = Math.max(0, p.hp - damage); p.invulnerable = .9; p.hurtTimer = .2;
   p.attackPending = null; p.attackTimer = 0; p.slam = false;
   p.vx = knock * 300; p.vy = -190; p.onGround = false; anim(p, 'hurt');
@@ -105,7 +176,8 @@ function hurtEnemy(s, e, damage, knock = s.player.facing, force = 1) {
   if (s.damageTexts.length > 30) s.damageTexts.shift();
   s.hitStop = Math.max(s.hitStop, force > 1.2 ? .058 : .035); s.flash = Math.max(s.flash, .04); s.shake = Math.max(s.shake, .06 + force * .025); emit(s, 'hit');
   if (!e.hp) {
-    e.dead = true; e.phase = 'dead'; s.kills++; s.gold += e.kind === 'boss' ? 100 : e.kind === 'warden' ? 15 : 10;
+    e.dead = true; e.phase = 'dead'; s.kills++;
+    if (e.kind !== 'boss') enemyGear(s, e); s.gold += e.kind === 'boss' ? 100 : e.kind === 'warden' ? 15 : 10;
     particles(s, x, e.y + e.h / 2, '#e7c88d', 24, 'ember', 1.35); emit(s, 'kill');
     if (e.kind === 'boss') { impact(s, x, y, '#e9bdff', 520, 'storm'); s.hitStop = .14; s.flash = .3; finish(s, true); }
   }
@@ -115,6 +187,21 @@ const COMBOS = [
   { duration: .26, delay: .055, range: 172, multiplier: 1.15, lunge: 300, radius: 139, color: '#f5ebff' },
   { duration: .34, delay: .09, range: 208, multiplier: 1.7, lunge: 390, radius: 169, color: '#ffd69d' },
 ];
+function weaponCombos(type) {
+  if (type === 'gauntlet') return [
+    { duration: .13, delay: .027, range: 88, multiplier: .86, lunge: 130, radius: 62, color: '#ffb181' },
+    { duration: .15, delay: .033, range: 100, multiplier: 1.04, lunge: 180, radius: 76, color: '#ffd2aa' },
+    { duration: .2, delay: .05, range: 120, multiplier: 1.65, lunge: 280, radius: 92, color: '#fff1b1' },
+  ];
+  if (type === 'spear') return COMBOS.map((c, i) => ({ ...c, duration: c.duration * 1.08, delay: .065 + i * .016, range: 245 + i * 42, lunge: 130 + i * 65, radius: 130 + i * 35, color: '#ffe5a7' }));
+  if (type === 'greatsword') return COMBOS.map((c, i) => ({ ...c, duration: c.duration * 1.75, delay: .14 + i * .025, range: 240 + i * 37, multiplier: 1 + i * .32, lunge: 180 + i * 75, radius: 170 + i * 30, color: '#f9a1ba' }));
+  if (type === 'scythe') return COMBOS.map((c, i) => ({ ...c, duration: c.duration * 1.18, delay: .07 + i * .018, range: 185 + i * 28, lunge: 130 + i * 45, radius: 142 + i * 30, color: '#c1a4ff' }));
+  if (['gun', 'bow', 'harpoon'].includes(type)) {
+    const spec = weaponSpec(type);
+    return COMBOS.map((c, i) => ({ ...c, duration: c.duration * spec.tempo, delay: type === 'gun' ? .04 : type === 'bow' ? .12 + i * .025 : .16, range: spec.range, lunge: 0, radius: type === 'gun' ? 32 : 60, color: spec.color }));
+  }
+  return COMBOS;
+}
 export function attack(s) {
   const p = s.player;
   if (s.mode !== 'playing' || p.dashTimer > 0 || p.castTimer > 0 || p.slam || p.hurtTimer > 0) return false;
@@ -124,23 +211,48 @@ export function attack(s) {
     if (nearest && Math.abs(center(nearest) - center(p)) < 190) p.facing = center(nearest) > center(p) ? 1 : -1;
   }
   p.combo = p.comboWindow > 0 ? p.combo % 3 + 1 : 1;
-  const combo = COMBOS[p.combo - 1], tempo = s.attackCooldown / .29;
-  p.attackTimer = combo.duration * tempo; p.attackDuration = p.attackTimer; p.attackPending = { combo: p.combo, delay: combo.delay * tempo }; p.attackQueued = 0; p.comboWindow = .85;
+  const type = weaponFor(s).type, combo = weaponCombos(type)[p.combo - 1], tempo = s.attackCooldown / .29;
+  p.attackTimer = combo.duration * tempo; p.attackDuration = p.attackTimer; p.attackPending = { combo: p.combo, weaponType: type, delay: combo.delay * tempo }; p.attackQueued = 0; p.comboWindow = .85;
   p.vx = p.facing * combo.lunge; anim(p, `attack${p.combo}`); p.animTime = 0;
   emit(s, 'attack'); return true;
+}
+function friendlyShot(s, kind, x, y, vx, vy, damage, color, extra = {}) {
+  const shot = { x, y, vx, vy, w: 24, h: 10, life: 1.2, kind, enemy: false, damage, color, facing: Math.sign(vx) || s.player.facing, hits: [], broken: [], pierce: 1, ...extra };
+  s.projectiles.push(shot); return shot;
 }
 function tickAttack(s, dt) {
   const p = s.player;
   if (!p.attackPending) return;
   p.attackPending.delay -= dt;
   if (p.attackPending.delay > 0) return;
-  const index = p.attackPending.combo, combo = COMBOS[index - 1]; p.attackPending = null;
-  const x = center(p), y = p.y + 34;
-  s.slashes.push({ x, y, facing: p.facing, combo: index, radius: combo.radius, color: combo.color, life: .2, maxLife: .2 });
+  const { combo: index, weaponType } = p.attackPending, combo = weaponCombos(weaponType)[index - 1]; p.attackPending = null;
+  const spec = weaponFor(s), x = center(p), y = p.y + 34, damage = s.damage * spec.damageMultiplier * combo.multiplier;
+  if (spec.family === 'ranged') {
+    const target = alive(s).filter(e => Math.sign(center(e) - x) === p.facing && Math.abs(e.y + e.h / 2 - y) < 180 && Math.abs(center(e) - x) < spec.range)
+      .sort((a, b) => Math.abs(center(a) - x) - Math.abs(center(b) - x))[0];
+    const angle = target ? Math.atan2(target.y + target.h * .42 - y, Math.abs(center(target) - x)) : 0;
+    const shots = weaponType === 'gun' && index === 3 ? 3 : 1;
+    for (let i = 0; i < shots; i++) {
+      const spread = angle + (i - (shots - 1) / 2) * .08, speed = weaponType === 'gun' ? 1800 : weaponType === 'bow' ? 970 + index * 85 : 1150;
+      friendlyShot(s, weaponType === 'gun' ? 'bullet' : weaponType === 'bow' ? 'playerArrow' : 'harpoon', x + p.facing * 22, y - 5, Math.cos(spread) * speed * p.facing, Math.sin(spread) * speed,
+        damage * (shots > 1 ? .48 : 1), spec.color, { w: weaponType === 'gun' ? 30 : 38, h: weaponType === 'harpoon' ? 16 : 8, life: spec.range / speed, pierce: weaponType === 'bow' ? index + 1 : 1, pull: weaponType === 'harpoon' ? { x: x + p.facing * 75, duration: .45 } : null, originX: x, originY: y, force: weaponType === 'harpoon' ? 2 : .9 + index * .15 });
+    }
+    particles(s, x + p.facing * 35, y, spec.color, weaponType === 'gun' ? 16 : 8, 'spark');
+    impact(s, x + p.facing * 26, y, spec.color, weaponType === 'gun' ? 48 : 35, weaponType === 'gun' ? 'gun' : 'shoot');
+    p.vx -= p.facing * (weaponType === 'gun' ? 90 : 45); emit(s, weaponType === 'gun' ? 'gun' : 'bow');
+    return;
+  }
+  s.slashes.push({ x, y, facing: p.facing, combo: index, weaponType, radius: combo.radius, color: combo.color, life: .2, maxLife: .2 });
   particles(s, x + p.facing * 50, y, combo.color, 8, 'spark');
-  const box = { x: p.facing > 0 ? x - 12 : x - combo.range, y: p.y - (index === 3 ? 35 : 14), w: combo.range + 12, h: p.h + (index === 3 ? 80 : 34) };
-  for (const e of alive(s)) if (overlap(box, e)) hurtEnemy(s, e, s.damage * combo.multiplier, p.facing, combo.multiplier);
-  for (const b of s.rooms[s.room].breakables) if (!b.broken && overlap(box, b)) breakObject(s, b, s.damage * combo.multiplier, p.facing);
+  const box = weaponType === 'spear' ? { x: p.facing > 0 ? x - 12 : x - combo.range, y: y - 27, w: combo.range + 12, h: 58 }
+    : { x: p.facing > 0 ? x - 12 : x - combo.range, y: p.y - (index === 3 ? 35 : 14), w: combo.range + 12, h: p.h + (index === 3 ? 80 : 34) };
+  const hit = e => weaponType === 'scythe' ? Math.hypot(center(e) - x, e.y + e.h / 2 - y) < combo.range : overlap(box, e);
+  const force = weaponType === 'greatsword' ? 2 + index * .4 : weaponType === 'gauntlet' && index === 3 ? 2.5 : combo.multiplier;
+  for (const e of alive(s)) if (hit(e)) {
+    hurtEnemy(s, e, damage, Math.sign(center(e) - x) || p.facing, force);
+    if (weaponType === 'scythe' && !e.dead) { e.bleed = 2.4; e.bleedTick = .6; e.bleedDamage = s.damage * spec.multiplier * .14; }
+  }
+  for (const b of s.rooms[s.room].breakables) if (!b.broken && hit(b)) breakObject(s, b, damage, p.facing);
 }
 export function jump(s) {
   const p = s.player;
@@ -161,26 +273,70 @@ export function dash(s) {
   particles(s, center(p), p.y + 35, '#a8a3ff', 12); emit(s, 'dash'); return true;
 }
 export function skill(s, index = 0) {
-  const p = s.player, spec = SKILLS[index];
-  if (s.mode !== 'playing' || !spec || p.skillCooldowns[index] > 0 || p.dashTimer > 0 || p.hurtTimer > 0) return false;
-  p.skillCooldowns[index] = spec.cooldown; p.attackPending = null; p.attackTimer = 0; p.attackQueued = 0; p.slam = false; p.castTimer = index === 0 ? .19 : .32;
+  const p = s.player, spec = skillFor(s, index);
+  if (s.mode !== 'playing' || !spec || spec.remaining > 0 || p.dashTimer > 0 || p.hurtTimer > 0) return false;
+  p.cooldownsBySkill[spec.id] = spec.cooldown; p.skillCooldowns = p.skills.map(id => p.cooldownsBySkill[id] || 0);
+  p.attackPending = null; p.attackTimer = 0; p.attackQueued = 0; p.slam = false; p.castTimer = spec.id === 'storm' ? .32 : .19; p.castSkill = spec.id;
   anim(p, 'cast'); p.animTime = 0;
-  const x = center(p), y = p.y + 32;
-  if (index === 0) {
-    s.projectiles.push({ x: x + p.facing * 18, y: y - 62, vx: p.facing * 1020, vy: 0, w: 52, h: 126, life: .75, kind: 'wave', enemy: false, damage: s.damage * 2.7, color: spec.color, facing: p.facing, hits: [], broken: [] });
-    particles(s, x, y, spec.color, 22, 'ember', 1.4); impact(s, x, y, spec.color, 105, 'cast');
-    s.shake = .09;
-  } else {
+  const x = center(p), y = p.y + 32, damage = s.damage * spec.multiplier;
+  if (spec.id === 'crimson') {
+    friendlyShot(s, 'wave', x + p.facing * 18, y - 62, p.facing * 1020, 0, damage * 2.7, spec.color, { w: 52, h: 126, life: .75, pierce: Infinity, force: 1.5 });
+    particles(s, x, y, spec.color, 22, 'ember', 1.4); impact(s, x, y, spec.color, 105, 'cast'); s.shake = .09;
+  } else if (spec.id === 'storm') {
     const radius = 270;
-    for (const e of alive(s)) if (Math.hypot(center(e) - x, e.y + e.h / 2 - y) < radius + e.w / 2) hurtEnemy(s, e, s.damage * 3.4, Math.sign(center(e) - x) || p.facing, 1.8);
+    for (const e of alive(s)) if (Math.hypot(center(e) - x, e.y + e.h / 2 - y) < radius + e.w / 2) hurtEnemy(s, e, damage * 3.4, Math.sign(center(e) - x) || p.facing, 1.8);
     for (const b of s.rooms[s.room].breakables) if (!b.broken && Math.hypot(center(b) - x, b.y + b.h / 2 - y) < radius) breakObject(s, b, 999, Math.sign(center(b) - x) || 1);
-    // Clearing nearby projectiles makes the storm a deliberate defensive counter.
     s.projectiles = s.projectiles.filter(shot => !shot.enemy || Math.hypot(shot.x - x, shot.y - y) > radius);
-    p.invulnerable = Math.max(p.invulnerable, .4);
-    particles(s, x, y, spec.color, 65, 'ember', 1.65); impact(s, x, y, spec.color, radius, 'storm');
+    p.invulnerable = Math.max(p.invulnerable, .4); particles(s, x, y, spec.color, 65, 'ember', 1.65); impact(s, x, y, spec.color, radius, 'storm');
     s.shake = .19; s.hitStop = Math.max(s.hitStop, .075); s.flash = .13;
+  } else if (spec.id === 'meteor') {
+    const targets = alive(s).filter(e => Math.hypot(center(e) - x, e.y + e.h / 2 - y) < 850).sort((a, b) => Math.abs(center(a) - x) - Math.abs(center(b) - x)).slice(0, 3);
+    const marks = targets.length ? targets.map(e => ({ x: center(e), y: e.y + e.h - 20 })) : [{ x: clamp(x + p.facing * 240, 60, roomWidth(s) - 60), y: p.y + p.h - 20 }];
+    for (const mark of marks) s.skillEffects.push({ kind: 'meteor', ...mark, radius: 145, life: .65, maxLife: .65, damage: damage * 3.6, color: spec.color });
+    impact(s, x, y, spec.color, 85, 'cast'); emit(s, 'meteor');
+  } else if (spec.id === 'ice') {
+    friendlyShot(s, 'frost', x + p.facing * 18, y - 28, p.facing * 710, 0, damage * 1.6, spec.color, { w: 64, h: 64, life: 1.05, pierce: Infinity, freeze: 1.8, force: .65 });
+    particles(s, x, y, spec.color, 26, 'spark', 1.3); impact(s, x, y, spec.color, 100, 'freeze'); emit(s, 'ice');
+  } else if (spec.id === 'thunder') {
+    const struck = new Set(); let sourceX = x, sourceY = y;
+    for (let i = 0; i < 4; i++) {
+      const next = alive(s).filter(e => !struck.has(e) && Math.hypot(center(e) - sourceX, e.y + e.h / 2 - sourceY) < (i ? 340 : 580)).sort((a, b) => Math.hypot(center(a) - sourceX, a.y + a.h / 2 - sourceY) - Math.hypot(center(b) - sourceX, b.y + b.h / 2 - sourceY))[0];
+      if (!next) break; struck.add(next);
+      const tx = center(next), ty = next.y + next.h / 2;
+      impact(s, tx, ty, spec.color, 95, 'thunder'); Object.assign(s.impacts[s.impacts.length - 1], { fromX: sourceX, fromY: sourceY });
+      hurtEnemy(s, next, damage * (2.4 - i * .22), Math.sign(tx - sourceX) || p.facing, 1.1); sourceX = tx; sourceY = ty;
+    }
+    if (!struck.size) impact(s, x + p.facing * 170, y, spec.color, 80, 'thunder');
+    particles(s, x, y, spec.color, 24); emit(s, 'thunder');
+  } else if (spec.id === 'fan') {
+    for (let i = 0; i < 6; i++) {
+      const angle = (i - 2.5) * .16;
+      friendlyShot(s, 'bladeFan', x + p.facing * 18, y - 5, Math.cos(angle) * 1050 * p.facing, Math.sin(angle) * 1050, damage * 1.1, spec.color, { w: 30, h: 12, life: .8, pierce: 1, force: .8 });
+    }
+    impact(s, x, y, spec.color, 125, 'fan'); particles(s, x, y, spec.color, 20); emit(s, 'fan');
+  } else if (spec.id === 'grapnel') {
+    const target = alive(s).filter(e => Math.sign(center(e) - x) === p.facing && Math.abs(e.y + e.h / 2 - y) < 210 && Math.abs(center(e) - x) < 850).sort((a, b) => Math.abs(center(a) - x) - Math.abs(center(b) - x))[0];
+    const dy = target ? target.y + target.h / 2 - y : 0, dx = target ? Math.abs(center(target) - x) : 500, angle = Math.atan2(dy, dx);
+    friendlyShot(s, 'chainHook', x + p.facing * 18, y - 8, Math.cos(angle) * 1320 * p.facing, Math.sin(angle) * 1320, damage * 2.1, spec.color, { w: 38, h: 16, life: .7, pierce: 1, pull: { x: x + p.facing * 75, duration: .6 }, force: 1.8, originX: x, originY: y });
+    impact(s, x, y, spec.color, 88, 'grapnel'); emit(s, 'grapnel');
+  } else if (spec.id === 'ward') {
+    p.wardTimer = 4; p.wardHP = Math.round((65 + s.room * 6) * spec.multiplier);
+    impact(s, x, y, spec.color, 125, 'ward'); particles(s, x, y, spec.color, 32, 'ember', 1.1); emit(s, 'ward');
   }
-  emit(s, index === 0 ? 'skill' : 'storm'); return true;
+  emit(s, spec.id === 'storm' ? 'storm' : 'skill'); return true;
+}
+function tickSkillEffects(s, dt) {
+  for (const effect of s.skillEffects) {
+    effect.life -= dt;
+    if (effect.life > 0) continue;
+    if (effect.kind === 'meteor') {
+      for (const e of alive(s)) if (Math.hypot(center(e) - effect.x, e.y + e.h * .7 - effect.y) < effect.radius + e.w / 2) hurtEnemy(s, e, effect.damage, Math.sign(center(e) - effect.x) || 1, 2);
+      for (const b of s.rooms[s.room].breakables) if (!b.broken && Math.hypot(center(b) - effect.x, b.y + b.h / 2 - effect.y) < effect.radius) breakObject(s, b, 999);
+      impact(s, effect.x, effect.y, effect.color, effect.radius * 1.4, 'meteor'); particles(s, effect.x, effect.y, effect.color, 45, 'stone', 1.5); particles(s, effect.x, effect.y, '#ffeab0', 30, 'ember', 1.6);
+      s.shake = .21; s.hitStop = Math.max(s.hitStop, .07); emit(s, 'meteorHit');
+    }
+  }
+  s.skillEffects = s.skillEffects.filter(e => e.life > 0);
 }
 export function groundSlam(s) {
   const p = s.player;
@@ -259,9 +415,16 @@ function openChest(s, chest) {
   chest.relic = relic;
   if (relic === 'heart' || relic === 'vitality') { s.player.maxHp += 15; s.player.hp = Math.min(s.player.maxHp, s.player.hp + 35); }
   else if (relic === 'tempo') { s.attackCooldown = Math.max(.16, s.attackCooldown * .9); s.moveSpeed = Math.min(480, s.moveSpeed * 1.05); }
-  else if (relic === 'storm') { s.player.skillCooldowns = [0, 0]; s.player.flask = Math.min(s.player.maxFlask, s.player.flask + 1); }
+  else if (relic === 'storm') {
+    for (const id of s.player.skills) s.player.cooldownsBySkill[id] = 0;
+    s.player.skillCooldowns = [0, 0];
+    s.player.flask = Math.min(s.player.maxFlask, s.player.flask + 1);
+  }
   else s.damage += 5;
   chest.reward = relic === 'heart' || relic === 'vitality' ? '생명의 유물 · 최대 체력 +15' : relic === 'tempo' ? '발걸음의 유물 · 공격 속도 +10%' : relic === 'storm' ? '폭풍의 유물 · 스킬 충전 · 물약 +1' : '칼날의 유물 · 공격력 +5';
+  const chestIndex = s.rooms[s.room].chests.indexOf(chest);
+  dropGear(s, 'weapon', WEAPONS[(s.room * 3 + chestIndex + 3) % WEAPONS.length].id, center(chest) - 30, chest.y + chest.h, { rarity: chest.secret ? 'epic' : 'rare', source: 'chest' });
+  dropGear(s, 'skill', SKILLS[(s.room + chestIndex + 2) % SKILLS.length].id, center(chest) + 30, chest.y + chest.h, { rarity: chest.secret ? 'epic' : 'rare', source: 'chest' });
   grantLoot(s, chest.loot || [{ kind: 'gold', amount: 35 }, { kind: 'ember', amount: 2 }], center(chest), chest.y);
   particles(s, center(chest), chest.y, '#ffe4a0', 30, 'ember'); impact(s, center(chest), chest.y, '#ffe4a0', 135, 'chest');
   tell(s, chest.reward, 4); emit(s, 'chest'); return true;
@@ -275,7 +438,10 @@ export function interact(s) {
   const chest = room.chests.find(c => !c.opened && Math.hypot(center(c) - center(p), c.y + c.h / 2 - p.y - p.h / 2) < 105);
   if (chest) return openChest(s, chest);
   const exit = (def.exits || []).find(exit => nearExit(p, exit));
-  if (!exit || !Number.isInteger(exit.target) || !ROOM_DEFS[exit.target]) return false;
+  if (!exit || !Number.isInteger(exit.target) || !ROOM_DEFS[exit.target]) {
+    if (nearbyDrop(s)) { tell(s, '장비 획득 · 두 슬롯 중 교체할 장비를 선택하세요.'); emit(s, 'gearNearby'); return true; }
+    return false;
+  }
   if (exit.locked && !room.cleared) { tell(s, room.keyCollected ? '문을 지키는 여감시관을 처치하세요.' : '봉인된 문 · 높은 길에서 문양을 찾으세요.'); return false; }
   const from = s.room, next = exit.target, nextDef = ROOM_DEFS[next];
   const backExit = next < from ? nextDef.exits?.find(e => e.target === from) : null;
@@ -283,7 +449,7 @@ export function interact(s) {
   s.room = next; s.rooms[next].visited = true;
   p.x = clamp(spawn.x, 18, (nextDef.width || W) - p.w - 18); p.y = spawn.y - p.h; p.vx = 0; p.vy = 0; p.onGround = true; p.jumps = 0; p.coyote = .1; p.invulnerable = .7; p.slam = false;
   p.attackPending = null; p.attackTimer = 0; p.attackQueued = 0; p.dashTimer = 0; p.castTimer = 0; p.combo = 0; p.comboWindow = 0; anim(p, 'idle');
-  s.projectiles = []; s.slashes = []; s.particles = []; s.impacts = []; s.damageTexts = []; s.trails = []; s.hitStop = 0; s.bossActive = false;
+  s.skillEffects = []; s.projectiles = []; s.slashes = []; s.particles = []; s.impacts = []; s.damageTexts = []; s.trails = []; s.hitStop = 0; s.bossActive = false;
   explore(s);
   tell(s, `${nextDef.name} · ${next === 5 ? '공허의 여왕이 깨어납니다.' : '미로의 높은 길에서 봉인 문양을 찾으세요.'}`, 4); emit(s, 'room'); return true;
 }
@@ -333,6 +499,19 @@ function enemyMelee(s, e, reach) {
 function tickEnemy(s, e, dt) {
   if (e.dead) return;
   const p = s.player;
+  if (e.bleed > 0) {
+    e.bleed = Math.max(0, e.bleed - dt); e.bleedTick -= dt;
+    if (e.bleedTick <= 0) { e.bleedTick += .6; hurtEnemy(s, e, e.bleedDamage, 0, .2); if (e.dead) return; }
+  }
+  if (e.freeze > 0) {
+    e.freeze = Math.max(0, e.freeze - dt); e.vx = 0; e.vy = Math.min(1100, e.vy + 1850 * dt); moveBody(s, e, dt); return;
+  }
+  if (e.pull && e.kind !== 'boss') {
+    e.pull.life -= dt; e.vx = clamp((e.pull.x - center(e)) * 10, -850, 850); e.vy = Math.min(1100, e.vy + 1850 * dt);
+    moveBody(s, e, dt);
+    if (e.pull.life <= 0 || Math.abs(e.pull.x - center(e)) < 16) e.pull = null;
+    return;
+  }
   e.hurt = Math.max(0, e.hurt - dt); e.attackTimer = Math.max(0, e.attackTimer - dt); e.jumpCooldown = Math.max(0, e.jumpCooldown - dt); e.animTime += dt; e.timer -= dt;
   const dx = center(p) - center(e), distance = Math.abs(dx), vertical = Math.abs(p.y + p.h - e.y - e.h);
   e.vy = Math.min(1100, e.vy + 1850 * dt);
@@ -414,26 +593,72 @@ function explore(s) {
   const cx = Math.floor(center(p) / 128), cy = Math.floor((p.y + p.h / 2) / 128);
   for (let y = Math.max(0, cy - 2); y <= Math.min(Math.ceil(H / 128) - 1, cy + 2); y++) for (let x = Math.max(0, cx - 3); x <= Math.min(cols - 1, cx + 3); x++) room.explored[y * cols + x] = true;
 }
+// Segment/expanded-rectangle collision accounts for both axes and fast bullets.
+function contactFraction(x, y, dx, dy, w, h, rect) {
+  let near = 0, far = 1;
+  for (const [origin, delta, min, max] of [[x, dx, rect.x - w, rect.x + rect.w], [y, dy, rect.y - h, rect.y + rect.h]]) {
+    if (Math.abs(delta) < 1e-8) { if (origin < min || origin > max) return null; }
+    else {
+      let a = (min - origin) / delta, b = (max - origin) / delta;
+      if (a > b) [a, b] = [b, a]; near = Math.max(near, a); far = Math.min(far, b);
+      if (near > far) return null;
+    }
+  }
+  return near >= 0 && near <= 1 ? near : null;
+}
 function tickProjectiles(s, dt) {
   const p = s.player, solids = solidRects(s), enemies = s.rooms[s.room].enemies, breakables = s.rooms[s.room].breakables;
   for (const shot of s.projectiles) {
-    const oldX = shot.x;
-    shot.life -= dt; shot.x += shot.vx * dt; shot.y += shot.vy * dt;
+    const oldX = shot.x, oldY = shot.y, dx = shot.vx * dt, dy = shot.vy * dt;
+    shot.life -= dt; shot.x += dx; shot.y += dy;
     if (shot.life <= 0) continue;
-    // A swept box keeps fast sword waves from skipping narrow bodies on a slow frame.
-    const swept = { ...shot, x: Math.min(oldX, shot.x), w: shot.w + Math.abs(shot.x - oldX) };
     if (shot.enemy !== false) {
-      if (overlap(swept, p)) { hurtPlayer(s, shot.damage, shot.vx >= 0 ? 1 : -1); shot.life = 0; }
-      if (solids.some(r => overlap(shot, r))) { particles(s, shot.x, shot.y, shot.color || '#efa9ca', 6); shot.life = 0; }
+      if (p.wardTimer > 0 && p.wardHP > 0 && Math.hypot(shot.x - center(p), shot.y - p.y - 36) < 95) {
+        p.wardHP = Math.max(0, p.wardHP - shot.damage * .35); if (!p.wardHP) p.wardTimer = 0;
+        impact(s, shot.x, shot.y, '#f4da9c', 45, 'ward'); shot.life = 0; emit(s, 'block'); continue;
+      }
+      const playerHit = contactFraction(oldX, oldY, dx, dy, shot.w, shot.h, p);
+      const wallHits = solids.map(r => contactFraction(oldX, oldY, dx, dy, shot.w, shot.h, r)).filter(t => t !== null);
+      const wallHit = wallHits.length ? Math.min(...wallHits) : Infinity;
+      if (playerHit !== null && playerHit < wallHit) { hurtPlayer(s, shot.damage, shot.vx >= 0 ? 1 : -1); shot.life = 0; }
+      else if (wallHit !== Infinity) { particles(s, oldX + dx * wallHit, oldY + dy * wallHit, shot.color || '#efa9ca', 6); shot.life = 0; }
     } else {
-      for (let i = 0; i < enemies.length; i++) if (!enemies[i].dead && !shot.hits.includes(i) && overlap(swept, enemies[i])) { shot.hits.push(i); hurtEnemy(s, enemies[i], shot.damage, shot.facing, 1.5); }
-      for (let i = 0; i < breakables.length; i++) if (!breakables[i].broken && !shot.broken.includes(i) && overlap(swept, breakables[i])) { shot.broken.push(i); breakObject(s, breakables[i], 999, shot.facing); }
-      if (solids.filter(r => !breakables.includes(r)).some(r => overlap(shot, r))) { impact(s, shot.x, shot.y + shot.h / 2, shot.color, 95, 'shatter'); shot.life = 0; }
-      if (shot.life > 0) particles(s, shot.x + shot.w / 2, shot.y + shot.h / 2, shot.color, 2, 'ember', .4);
+      const collisions = [];
+      for (let i = 0; i < enemies.length; i++) if (!enemies[i].dead && !shot.hits.includes(i)) {
+        const t = contactFraction(oldX, oldY, dx, dy, shot.w, shot.h, enemies[i]); if (t !== null) collisions.push({ t, enemy: enemies[i], index: i });
+      }
+      for (let i = 0; i < breakables.length; i++) if (!breakables[i].broken && !shot.broken.includes(i)) {
+        const t = contactFraction(oldX, oldY, dx, dy, shot.w, shot.h, breakables[i]); if (t !== null) collisions.push({ t, breakable: breakables[i], index: i });
+      }
+      for (const r of solids.filter(r => !breakables.includes(r))) {
+        const t = contactFraction(oldX, oldY, dx, dy, shot.w, shot.h, r); if (t !== null) collisions.push({ t, wall: r });
+      }
+      collisions.sort((a, b) => a.t - b.t);
+      for (const collision of collisions) {
+        if (shot.life <= 0) break;
+        if (collision.enemy) {
+          const e = collision.enemy; shot.hits.push(collision.index); hurtEnemy(s, e, shot.damage, shot.facing, shot.force || 1.5);
+          if (!e.dead && shot.freeze) { e.freeze = e.kind === 'boss' ? Math.min(.4, shot.freeze) : shot.freeze; impact(s, center(e), e.y + e.h / 2, shot.color, 70, 'freeze'); }
+          if (!e.dead && shot.pull && e.kind !== 'boss') { e.pull = { x: shot.pull.x, life: shot.pull.duration }; e.stagger = 0; impact(s, center(e), e.y + 35, shot.color, 80, 'grapnel'); }
+          if (shot.hits.length >= shot.pierce) shot.life = 0;
+        } else if (collision.breakable) {
+          const b = collision.breakable; shot.broken.push(collision.index); breakObject(s, b, shot.kind === 'wave' ? 999 : shot.damage, shot.facing);
+          if ((b.solid || b.kind === 'wall') && !b.broken) shot.life = 0;
+        } else {
+          shot.x = oldX + dx * collision.t; shot.y = oldY + dy * collision.t;
+          impact(s, shot.x, shot.y + shot.h / 2, shot.color, 70, 'shatter'); shot.life = 0;
+        }
+      }
+      if (shot.life > 0) particles(s, shot.x + shot.w / 2, shot.y + shot.h / 2, shot.color, shot.kind === 'bullet' ? 1 : 2, 'ember', .4);
     }
     if (shot.y > floorFor(s) + 60 || shot.x < -100 || shot.x > roomWidth(s) + 100) shot.life = 0;
   }
   s.projectiles = s.projectiles.filter(shot => shot.life > 0);
+}
+function tickGear(s, dt) {
+  for (const drop of s.rooms[s.room].gearDrops) if (!drop.collected && !drop.onGround) {
+    drop.vy = Math.min(1000, drop.vy + 1850 * dt); moveBody(s, drop, dt);
+  }
 }
 export function step(s, input = {}, dt = 1 / 60) {
   dt = Number.isFinite(dt) ? clamp(dt, 0, .05) : 0;
@@ -441,7 +666,10 @@ export function step(s, input = {}, dt = 1 / 60) {
   if (s.mode !== 'playing') { s.prevInput = { ...input }; return s; }
   const p = s.player, move = clamp(Number(input.move) || 0, -1, 1);
   s.time += dt; s.messageTimer = Math.max(0, s.messageTimer - dt);
-  p.dashCooldown = Math.max(0, p.dashCooldown - dt); p.skillCooldowns = p.skillCooldowns.map(t => Math.max(0, t - dt));
+  p.dashCooldown = Math.max(0, p.dashCooldown - dt);
+  for (const id of Object.keys(p.cooldownsBySkill)) p.cooldownsBySkill[id] = Math.max(0, p.cooldownsBySkill[id] - dt);
+  p.skillCooldowns = p.skills.map(id => p.cooldownsBySkill[id] || 0); p.wardTimer = Math.max(0, p.wardTimer - dt);
+  if (input.switch && !s.prevInput.switch) switchWeapon(s);
   if (move && p.dashTimer <= 0 && p.attackTimer <= 0) p.facing = move > 0 ? 1 : -1;
   if (input.jump && !s.prevInput.jump) p.jumpBuffer = .13;
   if (input.dash && !s.prevInput.dash) dash(s);
@@ -455,16 +683,17 @@ export function step(s, input = {}, dt = 1 / 60) {
   if (s.hitStop > 0) { s.hitStop = Math.max(0, s.hitStop - dt); s.prevInput = { ...input }; return s; }
   p.attackTimer = Math.max(0, p.attackTimer - dt); p.attackQueued = Math.max(0, p.attackQueued - dt); p.comboWindow = Math.max(0, p.comboWindow - dt);
   p.dashTimer = Math.max(0, p.dashTimer - dt); p.invulnerable = Math.max(0, p.invulnerable - dt); p.castTimer = Math.max(0, p.castTimer - dt); p.landingTimer = Math.max(0, p.landingTimer - dt); p.hurtTimer = Math.max(0, p.hurtTimer - dt); p.dropTimer = Math.max(0, p.dropTimer - dt);
+  if (p.pendingWeapon !== null && p.attackTimer <= 0 && p.castTimer <= 0) switchWeapon(s, p.pendingWeapon);
   p.coyote = p.onGround ? .11 : Math.max(0, p.coyote - dt); p.animTime += dt;
   if (p.jumpBuffer > 0) { if (!jump(s)) p.jumpBuffer = Math.max(0, p.jumpBuffer - dt); }
   if (p.attackQueued > 0 && p.attackTimer <= 0) attack(s);
   tickAttack(s, dt);
-  if (p.dashTimer > 0) { p.vx = p.facing * 1100; p.vy = 0; s.trails.push({ x: p.x, y: p.y, w: p.w, h: p.h, facing: p.facing, anim: 'dash', animTime: p.animTime, life: .16, maxLife: .16 }); }
+  if (p.dashTimer > 0) { p.vx = p.facing * 1100; p.vy = 0; s.trails.push({ x: p.x, y: p.y, w: p.w, h: p.h, facing: p.facing, anim: 'dash', weaponType: weaponFor(s).type, animTime: p.animTime, life: .16, maxLife: .16 }); }
   else {
     if (p.hurtTimer <= 0) {
       const target = p.slam ? move * 95 : move * s.moveSpeed;
       if (p.attackTimer > 0) {
-        const combo = COMBOS[Math.max(0, p.combo - 1)];
+        const combo = weaponCombos(weaponFor(s).type)[Math.max(0, p.combo - 1)];
         p.vx = target * .48 + p.facing * combo.lunge * Math.max(0, p.attackTimer / p.attackDuration - .3);
       } else p.vx += (target - p.vx) * Math.min(1, dt * (move ? 28 : 34));
     }
@@ -484,6 +713,7 @@ export function step(s, input = {}, dt = 1 / 60) {
   else if (!p.onGround) anim(p, p.vy < 0 ? 'jump' : 'fall');
   else if (p.landingTimer > 0) anim(p, 'land');
   else anim(p, Math.abs(p.vx) > 35 ? 'run' : 'idle');
+  tickSkillEffects(s, dt); tickGear(s, dt);
   for (const e of s.rooms[s.room].enemies) { tickEnemy(s, e, dt); if (s.mode !== 'playing') break; }
   if (s.mode === 'playing') tickProjectiles(s, dt);
   if (s.mode === 'playing') { collect(s); explore(s); clearRoom(s); if (p.interactQueued) { p.interactQueued = false; interact(s); } }
