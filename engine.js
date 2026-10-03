@@ -1,9 +1,12 @@
-import { W, H, FLOOR, ROOM_DEFS } from './world.js?v=2';
-export { W, H, FLOOR, ROOM_DEFS } from './world.js?v=2';
+import { W, H, FLOOR, ROOM_DEFS } from './world.js?v=4';
+export { W, H, FLOOR, ROOM_DEFS } from './world.js?v=4';
 import { WEAPONS, SKILLS, RARITIES, weaponSpec, skillSpec } from './arsenal.js?v=3';
 export { WEAPONS, SKILLS, RARITIES } from './arsenal.js?v=3';
 
 export const MAP_CELL = 128;
+export const DROP_RATES = Object.freeze({ weapon: .1, skill: .05, chest: .1 });
+const ENEMY_WAKE_X = 1600, ENEMY_WAKE_Y = 700, MAX_ENEMY_PROJECTILES = 128;
+const geometryCache = new WeakMap();
 const ENEMY_STATS = {
   duelist: { name: '잿빛 검무사', hp: 112, w: 32, h: 90, damage: 11, speed: 154 },
   archer: { name: '침묵의 궁수', hp: 94, w: 32, h: 90, damage: 12, speed: 0 },
@@ -40,7 +43,7 @@ function impact(s, x, y, color = '#f6e2cf', radius = 85, kind = 'hit') {
 }
 function enemy(kind, x, surfaceY, extra = {}) {
   const spec = ENEMY_STATS[kind] || ENEMY_STATS.duelist;
-  return { ...spec, ...extra, kind, x, y: surfaceY - spec.h, hp: extra.hp || spec.hp, maxHp: extra.hp || spec.hp, facing: -1, phase: 'idle', intent: '', timer: .7, attackTimer: 0, hurt: 0, stagger: 0, dead: false, attacks: 0, stage: 1, vx: 0, vy: 0, onGround: true, homeX: x, homeY: surfaceY - spec.h, jumpCooldown: 0, hitPlayer: false, animTime: 0, freeze: 0, bleed: 0, bleedTick: 0, bleedDamage: 0, pull: null };
+  return { ...spec, ...extra, kind, x, y: surfaceY - spec.h, hp: extra.hp || spec.hp, maxHp: extra.hp || spec.hp, facing: -1, phase: 'idle', intent: '', timer: Number.isFinite(extra.timer) ? Math.max(.05, extra.timer) : .7, attackTimer: 0, hurt: 0, stagger: 0, dead: false, attacks: 0, stage: 1, vx: 0, vy: 0, onGround: true, homeX: x, homeY: surfaceY - spec.h, jumpCooldown: 0, hitPlayer: false, animTime: 0, freeze: 0, bleed: 0, bleedTick: 0, bleedDamage: 0, pull: null, sleeping: false };
 }
 function makeRooms(s) {
   return ROOM_DEFS.map((def, index) => {
@@ -48,7 +51,7 @@ function makeRooms(s) {
     const items = (def.items || []).map(item => ({ ...item, amount: item.amount ?? 1, collected: false }));
     if (def.key && !items.some(item => item.kind === 'sigil')) items.push({ kind: 'sigil', ...def.key, amount: 1, collected: false });
     return {
-      visited: index === 0, cleared: false, boonTaken: false, keyCollected: !items.some(item => item.kind === 'sigil'),
+      visited: index === 0, cleared: false, boonTaken: false, keyCollected: !items.some(item => item.kind === 'sigil'), terrainVersion: 0, enemyActivity: { awake: 0, sleeping: 0 },
       enemies, items, gearDrops: [], breakables: (def.breakables || []).map(b => ({ ...b, hp: b.hp ?? (b.kind === 'wall' || b.kind === 'rune' ? 60 : 1), maxHp: b.hp ?? (b.kind === 'wall' || b.kind === 'rune' ? 60 : 1), broken: false })),
       chests: (def.chests || []).map(c => ({ w: 48, h: 35, ...c, opened: false })), explored: [], exploreCols: Math.ceil((def.width || W) / MAP_CELL), exploreRows: Math.ceil(H / MAP_CELL),
     };
@@ -60,8 +63,8 @@ export function createRun(meta = {}) {
   const spawn = ROOM_DEFS[0].spawn || { x: ROOM_DEFS[0].spawnX || 160, y: FLOOR };
   const s = {
     room: 0, rooms: [], player: { x: spawn.x, y: spawn.y - 90, w: 32, h: 90, vx: 0, vy: 0, facing: 1, hp: 120, maxHp: 120, onGround: true, jumps: 0, coyote: .1, jumpBuffer: 0, dropTimer: 0, attackTimer: 0, attackDuration: 0, attackPending: null, attackQueued: 0, combo: 0, comboWindow: 0, dashTimer: 0, dashCooldown: 0, invulnerable: 0, flask: 2, maxFlask: 3, weapons: [{ id: 'starter-sword', type: 'sword', rarity: 'common', level: 1 }, { id: 'starter-gun', type: 'gun', rarity: 'common', level: 1 }], activeWeapon: 0, pendingWeapon: null, skills: ['crimson', 'storm'], skillGear: [{ type: 'crimson', rarity: 'common', level: 1 }, { type: 'storm', rarity: 'common', level: 1 }], cooldownsBySkill: {}, skillCooldowns: [0, 0], wardTimer: 0, wardHP: 0, castTimer: 0, slam: false, landingTimer: 0, hurtTimer: 0, anim: 'idle', animTime: 0, runDistance: 0 },
-    time: 0, mode: 'playing', gearSerial: 0, skillEffects: [], particles: [], slashes: [], projectiles: [], impacts: [], damageTexts: [], trails: [], events: [], meta: saved,
-    kills: 0, gold: 0, embers: 0, boons: [], boonChoices: [], message: '높은 길에서 봉인 문양을 찾으세요. 금이 간 벽 너머에는 비밀이 있습니다.', messageTimer: 6,
+    time: 0, mode: 'playing', gearSerial: 0, gearCounts: { enemyWeapon: 0, enemySkill: 0, chestWeapon: 0, chestSkill: 0 }, skillEffects: [], particles: [], slashes: [], projectiles: [], impacts: [], damageTexts: [], trails: [], events: [], meta: saved,
+    kills: 0, gold: 0, embers: 0, boons: [], boonChoices: [], message: '왼쪽 회랑에서 다수의 적을 돌파하거나, 높은 미로에서 봉인 문양을 찾으세요.', messageTimer: 6,
     bossActive: false, bossDefeated: false, rewardDone: false, damage: 36 + saved.power * 2, attackCooldown: .29, moveSpeed: 390,
     rng: (nonnegative(meta.seed) || ((Date.now() ^ (saved.runs * 2654435761)) >>> 0)) || 1,
     prevInput: {}, shake: 0, hitStop: 0, flash: 0,
@@ -110,13 +113,23 @@ function dropGear(s, kind, type, x, y, extra = {}) {
 }
 function enemyGear(s, e) {
   const weapons = ['gauntlet', 'spear', 'bow', 'harpoon', 'greatsword', 'scythe', 'gun', 'sword'];
-  const rarity = s.kills === 1 ? 'common' : e.guardian || random(s) > .91 ? 'epic' : random(s) > .52 ? 'rare' : 'common';
-  dropGear(s, 'weapon', weapons[(s.kills - 1) % weapons.length], center(e), e.y + e.h, { rarity });
-  if (s.kills % 2 === 0) {
-    const skills = ['meteor', 'ice', 'thunder', 'fan', 'grapnel', 'ward', 'crimson', 'storm'];
-    dropGear(s, 'skill', skills[(s.kills / 2 - 1) % skills.length], center(e) + 54, e.y + e.h, { rarity: e.guardian ? 'epic' : 'rare' });
+  // Roll each category independently: ten times the enemies yield the old
+  // expected amount of equipment, without tying variety to kill-count parity.
+  const weaponRoll = random(s) < DROP_RATES.weapon, skillRoll = random(s) < DROP_RATES.skill;
+  const names = [];
+  if (weaponRoll) {
+    const type = weapons[s.gearCounts.enemyWeapon % weapons.length];
+    const rarity = s.gearCounts.enemyWeapon === 0 ? 'common' : e.guardian || random(s) > .91 ? 'epic' : random(s) > .52 ? 'rare' : 'common';
+    dropGear(s, 'weapon', type, center(e), e.y + e.h, { rarity });
+    s.gearCounts.enemyWeapon++; names.push(weaponSpec(type).name);
   }
-  tell(s, `${weaponSpec(weapons[(s.kills - 1) % weapons.length]).name} 드랍 · 가까이서 E 또는 장비를 터치하세요.`, 3);
+  if (skillRoll) {
+    const skills = ['meteor', 'ice', 'thunder', 'fan', 'grapnel', 'ward', 'crimson', 'storm'];
+    const type = skills[s.gearCounts.enemySkill % skills.length];
+    dropGear(s, 'skill', type, center(e) + (weaponRoll ? 54 : 0), e.y + e.h, { rarity: e.guardian ? 'epic' : 'rare' });
+    s.gearCounts.enemySkill++; names.push(skillSpec(type).name);
+  }
+  if (names.length) tell(s, `${names.join(' · ')} 드랍 · 가까이서 E 또는 장비를 터치하세요.`, 3);
 }
 export function nearbyDrop(s) {
   const p = s.player;
@@ -141,6 +154,12 @@ export function equipDrop(s, dropId, slot) {
     p.skillCooldowns = p.skills.map(id => p.cooldownsBySkill[id] || 0);
   } else return false;
   drop.collected = true;
+  // Keep discarded gear in the world; trim only old consumed records after
+  // repeated swaps so a long run cannot accumulate an ever-growing history.
+  const drops = s.rooms[s.room].gearDrops;
+  if (drops.length > 128) for (let i = drops.length - 1, consumed = 0; i >= 0; i--) {
+    if (drops[i].collected && ++consumed > 32) drops.splice(i, 1);
+  }
   particles(s, center(p), p.y + 35, (drop.kind === 'weapon' ? weaponSpec(drop.type) : skillSpec(drop.type)).color, 20, 'ember');
   tell(s, `${drop.kind === 'weapon' ? weaponSpec(drop.type).name : skillSpec(drop.type).name} · ${slot + 1}번 슬롯에 장착했습니다.`, 3);
   emit(s, 'equip'); return true;
@@ -368,6 +387,7 @@ function breakObject(s, b, damage = 999, direction = 1) {
   particles(s, center(b), b.y + b.h / 2, b.color || '#c3ab86', b.hp ? 6 : 24, 'stone', b.hp ? .6 : 1.3);
   if (b.hp) { emit(s, 'chip'); return true; }
   b.broken = true;
+  s.rooms[s.room].terrainVersion++;
   impact(s, center(b), b.y + b.h / 2, b.color || '#d5bd94', b.kind === 'wall' || b.kind === 'rune' ? 130 : 70, 'shatter');
   s.shake = Math.max(s.shake, .065); s.hitStop = Math.max(s.hitStop, .018);
   grantLoot(s, b.loot, center(b), b.y + b.h - 8);
@@ -423,8 +443,15 @@ function openChest(s, chest) {
   else s.damage += 5;
   chest.reward = relic === 'heart' || relic === 'vitality' ? '생명의 유물 · 최대 체력 +15' : relic === 'tempo' ? '발걸음의 유물 · 공격 속도 +10%' : relic === 'storm' ? '폭풍의 유물 · 스킬 충전 · 물약 +1' : '칼날의 유물 · 공격력 +5';
   const chestIndex = s.rooms[s.room].chests.indexOf(chest);
-  dropGear(s, 'weapon', WEAPONS[(s.room * 3 + chestIndex + 3) % WEAPONS.length].id, center(chest) - 30, chest.y + chest.h, { rarity: chest.secret ? 'epic' : 'rare', source: 'chest' });
-  dropGear(s, 'skill', SKILLS[(s.room + chestIndex + 2) % SKILLS.length].id, center(chest) + 30, chest.y + chest.h, { rarity: chest.secret ? 'epic' : 'rare', source: 'chest' });
+  const weaponRoll = random(s) < DROP_RATES.chest, skillRoll = random(s) < DROP_RATES.chest;
+  if (weaponRoll) {
+    dropGear(s, 'weapon', WEAPONS[(s.room * 3 + chestIndex + 3) % WEAPONS.length].id, center(chest) - 30, chest.y + chest.h, { rarity: chest.secret ? 'epic' : 'rare', source: 'chest' });
+    s.gearCounts.chestWeapon++;
+  }
+  if (skillRoll) {
+    dropGear(s, 'skill', SKILLS[(s.room + chestIndex + 2) % SKILLS.length].id, center(chest) + 30, chest.y + chest.h, { rarity: chest.secret ? 'epic' : 'rare', source: 'chest' });
+    s.gearCounts.chestSkill++;
+  }
   grantLoot(s, chest.loot || [{ kind: 'gold', amount: 35 }, { kind: 'ember', amount: 2 }], center(chest), chest.y);
   particles(s, center(chest), chest.y, '#ffe4a0', 30, 'ember'); impact(s, center(chest), chest.y, '#ffe4a0', 135, 'chest');
   tell(s, chest.reward, 4); emit(s, 'chest'); return true;
@@ -453,12 +480,17 @@ export function interact(s) {
   explore(s);
   tell(s, `${nextDef.name} · ${next === 5 ? '공허의 여왕이 깨어납니다.' : '미로의 높은 길에서 봉인 문양을 찾으세요.'}`, 4); emit(s, 'room'); return true;
 }
-function solidRects(s) {
-  const def = roomFor(s);
-  return [...(def.solids || def.walls || []), ...(def.platforms || []).filter(p => p.oneWay === false || p.solid), ...s.rooms[s.room].breakables.filter(b => !b.broken && (b.solid || b.kind === 'wall' || b.kind === 'rune'))];
+function geometryFor(s) {
+  const room = s.rooms[s.room], def = roomFor(s), cached = geometryCache.get(room);
+  if (cached?.version === room.terrainVersion) return cached;
+  const fixedSolids = [...(def.solids || def.walls || []), ...(def.platforms || []).filter(p => p.oneWay === false || p.solid)];
+  const solids = [...fixedSolids, ...room.breakables.filter(b => !b.broken && (b.solid || b.kind === 'wall' || b.kind === 'rune'))];
+  const platforms = (def.platforms || []).filter(p => p.oneWay !== false && !p.solid);
+  const geometry = { version: room.terrainVersion, fixedSolids, solids, platforms, landingSurfaces: [...solids, ...platforms], particleSurfaces: [...(def.platforms || []), ...solids, { x: 0, y: floorFor(s), w: roomWidth(s), h: 160 }] };
+  geometryCache.set(room, geometry); return geometry;
 }
 function moveBody(s, body, dt, drop = false) {
-  const solids = solidRects(s), oldX = body.x, oldY = body.y, dx = body.vx * dt, dy = body.vy * dt;
+  const geometry = geometryFor(s), solids = geometry.solids, oldX = body.x, oldY = body.y, dx = body.vx * dt, dy = body.vy * dt;
   let nextX = clamp(oldX + dx, 18, roomWidth(s) - body.w - 18), wallHit = false;
   for (const r of solids) {
     if (body.y + body.h <= r.y + .1 || body.y >= r.y + r.h - .1) continue;
@@ -471,8 +503,8 @@ function moveBody(s, body, dt, drop = false) {
   let nextY = oldY + dy, landed = false;
   if (dy >= 0) {
     let surface = floorFor(s);
-    const platforms = drop ? [] : (roomFor(s).platforms || []).filter(p => p.oneWay !== false && !p.solid);
-    for (const r of [...solids, ...platforms]) if (body.x + body.w > r.x + .5 && body.x < r.x + r.w - .5 && oldBottom <= r.y + .5 && nextY + body.h >= r.y) surface = Math.min(surface, r.y);
+    const surfaces = drop ? solids : geometry.landingSurfaces;
+    for (const r of surfaces) if (body.x + body.w > r.x + .5 && body.x < r.x + r.w - .5 && oldBottom <= r.y + .5 && nextY + body.h >= r.y) surface = Math.min(surface, r.y);
     if (nextY + body.h >= surface && oldBottom <= surface + 2) { nextY = surface - body.h; body.vy = 0; landed = true; }
   } else {
     for (const r of solids) if (body.x + body.w > r.x + .5 && body.x < r.x + r.w - .5 && oldY >= r.y + r.h - .5 && nextY < r.y + r.h) { nextY = Math.max(nextY, r.y + r.h); body.vy = 0; }
@@ -482,7 +514,16 @@ function moveBody(s, body, dt, drop = false) {
 }
 function projectile(s, e) {
   const x = center(e), y = e.y + 25, dx = e.targetX - x, dy = e.targetY - y, distance = Math.max(1, Math.hypot(dx, dy));
-  s.projectiles.push({ x, y, vx: dx / distance * 470, vy: dy / distance * 470, w: 22, h: 7, life: 4, kind: 'arrow', enemy: true, damage: e.damage, color: '#dfa0b8' }); emit(s, 'bow');
+  pushEnemyShot(s, { x, y, vx: dx / distance * 470, vy: dy / distance * 470, w: 22, h: 7, life: 4, kind: 'arrow', enemy: true, damage: e.damage, color: '#dfa0b8' }); emit(s, 'bow');
+}
+function pushEnemyShot(s, shot) {
+  const hostile = s.projectiles.filter(p => p.enemy !== false);
+  if (hostile.length >= MAX_ENEMY_PROJECTILES) {
+    const oldest = s.projectiles.findIndex(p => p.enemy !== false && !p.boss);
+    if (oldest < 0) return;
+    s.projectiles.splice(oldest, 1);
+  }
+  s.projectiles.push(shot);
 }
 function startWindup(s, e, intent, seconds) {
   e.phase = 'windup'; e.intent = intent; e.timer = seconds; e.hitPlayer = false;
@@ -502,6 +543,11 @@ function tickEnemy(s, e, dt) {
   if (e.bleed > 0) {
     e.bleed = Math.max(0, e.bleed - dt); e.bleedTick -= dt;
     if (e.bleedTick <= 0) { e.bleedTick += .6; hurtEnemy(s, e, e.bleedDamage, 0, .2); if (e.dead) return; }
+  }
+  if (e.sleeping) {
+    e.freeze = Math.max(0, e.freeze - dt);
+    if (e.pull) { e.pull.life -= dt; if (e.pull.life <= 0) e.pull = null; }
+    return;
   }
   if (e.freeze > 0) {
     e.freeze = Math.max(0, e.freeze - dt); e.vx = 0; e.vy = Math.min(1100, e.vy + 1850 * dt); moveBody(s, e, dt); return;
@@ -539,7 +585,7 @@ function tickEnemy(s, e, dt) {
     e.phase = 'attack'; e.timer = e.intent === 'lunge' ? .35 : .19; e.attacks++;
     if (e.intent === 'arrow') projectile(s, e);
     else if (e.intent === 'daggers') {
-      for (const x of e.targets) s.projectiles.push({ x: x - 7, y: Math.max(60, p.y - 650), vx: 0, vy: 660 + e.stage * 60, w: 14, h: 40, life: 2.6, kind: 'dagger', enemy: true, damage: e.damage, color: '#d9b2ef' }); emit(s, 'daggers');
+      for (const x of e.targets) pushEnemyShot(s, { x: x - 7, y: Math.max(60, p.y - 650), vx: 0, vy: 660 + e.stage * 60, w: 14, h: 40, life: 2.6, kind: 'dagger', enemy: true, boss: true, damage: e.damage, color: '#d9b2ef' }); emit(s, 'daggers');
     } else if (e.intent !== 'lunge') enemyMelee(s, e, e.intent === 'sweep' ? 330 : e.kind === 'warden' ? 180 : 120);
     emit(s, 'enemyAttack');
   } else if (e.phase === 'attack') {
@@ -551,12 +597,15 @@ function tickEnemy(s, e, dt) {
     if (e.vx > 0 && Number.isFinite(e.patrolMax)) e.vx = Math.min(e.vx, Math.max(0, (e.patrolMax - e.w - e.x) / Math.max(dt, .001)));
   }
   const moved = moveBody(s, e, dt);
+  if (e.kind === 'boss' && Number.isFinite(e.patrolMin) && Number.isFinite(e.patrolMax)) {
+    const bounded = clamp(e.x, e.patrolMin, e.patrolMax - e.w);
+    if (bounded !== e.x) { e.x = bounded; e.vx = 0; }
+  }
   if (moved.wallHit && e.onGround && e.kind === 'duelist' && e.jumpCooldown <= 0 && distance < 700) { e.vy = -640; e.jumpCooldown = 1.4; }
 }
 function tickEffects(s, dt) {
   s.shake = Math.max(0, s.shake - dt); s.flash = Math.max(0, s.flash - dt);
-  const solids = solidRects(s);
-  const surfaces = [...(roomFor(s).platforms || []), ...solids, { x: 0, y: floorFor(s), w: roomWidth(s), h: 160 }];
+  const geometry = geometryFor(s), solids = geometry.solids, surfaces = geometry.particleSurfaces;
   for (const p of s.particles) {
     const oldY = p.y, oldX = p.x;
     p.life -= dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += (p.kind === 'stone' ? 1450 : p.kind === 'dust' ? 170 : 560) * dt; p.rotation += p.angularVelocity * dt;
@@ -596,18 +645,22 @@ function explore(s) {
 // Segment/expanded-rectangle collision accounts for both axes and fast bullets.
 function contactFraction(x, y, dx, dy, w, h, rect) {
   let near = 0, far = 1;
-  for (const [origin, delta, min, max] of [[x, dx, rect.x - w, rect.x + rect.w], [y, dy, rect.y - h, rect.y + rect.h]]) {
-    if (Math.abs(delta) < 1e-8) { if (origin < min || origin > max) return null; }
-    else {
-      let a = (min - origin) / delta, b = (max - origin) / delta;
-      if (a > b) [a, b] = [b, a]; near = Math.max(near, a); far = Math.min(far, b);
-      if (near > far) return null;
-    }
+  if (Math.abs(dx) < 1e-8) { if (x < rect.x - w || x > rect.x + rect.w) return null; }
+  else {
+    const a = (rect.x - w - x) / dx, b = (rect.x + rect.w - x) / dx;
+    near = Math.max(near, Math.min(a, b)); far = Math.min(far, Math.max(a, b));
+    if (near > far) return null;
+  }
+  if (Math.abs(dy) < 1e-8) { if (y < rect.y - h || y > rect.y + rect.h) return null; }
+  else {
+    const a = (rect.y - h - y) / dy, b = (rect.y + rect.h - y) / dy;
+    near = Math.max(near, Math.min(a, b)); far = Math.min(far, Math.max(a, b));
+    if (near > far) return null;
   }
   return near >= 0 && near <= 1 ? near : null;
 }
 function tickProjectiles(s, dt) {
-  const p = s.player, solids = solidRects(s), enemies = s.rooms[s.room].enemies, breakables = s.rooms[s.room].breakables;
+  const p = s.player, geometry = geometryFor(s), solids = geometry.solids, enemies = s.rooms[s.room].enemies, breakables = s.rooms[s.room].breakables;
   for (const shot of s.projectiles) {
     const oldX = shot.x, oldY = shot.y, dx = shot.vx * dt, dy = shot.vy * dt;
     shot.life -= dt; shot.x += dx; shot.y += dy;
@@ -618,8 +671,8 @@ function tickProjectiles(s, dt) {
         impact(s, shot.x, shot.y, '#f4da9c', 45, 'ward'); shot.life = 0; emit(s, 'block'); continue;
       }
       const playerHit = contactFraction(oldX, oldY, dx, dy, shot.w, shot.h, p);
-      const wallHits = solids.map(r => contactFraction(oldX, oldY, dx, dy, shot.w, shot.h, r)).filter(t => t !== null);
-      const wallHit = wallHits.length ? Math.min(...wallHits) : Infinity;
+      let wallHit = Infinity;
+      for (const r of solids) { const t = contactFraction(oldX, oldY, dx, dy, shot.w, shot.h, r); if (t !== null) wallHit = Math.min(wallHit, t); }
       if (playerHit !== null && playerHit < wallHit) { hurtPlayer(s, shot.damage, shot.vx >= 0 ? 1 : -1); shot.life = 0; }
       else if (wallHit !== Infinity) { particles(s, oldX + dx * wallHit, oldY + dy * wallHit, shot.color || '#efa9ca', 6); shot.life = 0; }
     } else {
@@ -630,7 +683,7 @@ function tickProjectiles(s, dt) {
       for (let i = 0; i < breakables.length; i++) if (!breakables[i].broken && !shot.broken.includes(i)) {
         const t = contactFraction(oldX, oldY, dx, dy, shot.w, shot.h, breakables[i]); if (t !== null) collisions.push({ t, breakable: breakables[i], index: i });
       }
-      for (const r of solids.filter(r => !breakables.includes(r))) {
+      for (const r of geometry.fixedSolids) {
         const t = contactFraction(oldX, oldY, dx, dy, shot.w, shot.h, r); if (t !== null) collisions.push({ t, wall: r });
       }
       collisions.sort((a, b) => a.t - b.t);
@@ -714,7 +767,13 @@ export function step(s, input = {}, dt = 1 / 60) {
   else if (p.landingTimer > 0) anim(p, 'land');
   else anim(p, Math.abs(p.vx) > 35 ? 'run' : 'idle');
   tickSkillEffects(s, dt); tickGear(s, dt);
-  for (const e of s.rooms[s.room].enemies) { tickEnemy(s, e, dt); if (s.mode !== 'playing') break; }
+  const room = s.rooms[s.room]; room.enemyActivity.awake = 0; room.enemyActivity.sleeping = 0;
+  for (const e of room.enemies) {
+    if (e.dead) continue;
+    e.sleeping = Math.abs(center(e) - center(p)) > ENEMY_WAKE_X || Math.abs(e.y + e.h / 2 - p.y - p.h / 2) > ENEMY_WAKE_Y;
+    room.enemyActivity[e.sleeping ? 'sleeping' : 'awake']++;
+    tickEnemy(s, e, dt); if (s.mode !== 'playing') break;
+  }
   if (s.mode === 'playing') tickProjectiles(s, dt);
   if (s.mode === 'playing') { collect(s); explore(s); clearRoom(s); if (p.interactQueued) { p.interactQueued = false; interact(s); } }
   s.prevInput = { ...input }; return s;

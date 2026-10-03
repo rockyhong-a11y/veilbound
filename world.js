@@ -1,4 +1,5 @@
-export const W = 4096, H = 2048, FLOOR = 1880;
+export const CORE_X = 2048, CORE_W = 4096;
+export const W = CORE_X * 2 + CORE_W, H = 2048, FLOOR = 1880;
 
 // Platforms are one-way ledges. Masonry in solids collides on every side.
 const p = (x, y, w, h = 26) => ({ x, y, w, h, oneWay: true });
@@ -16,7 +17,7 @@ const gates = (index, surface, previousSurface) => [
   { x: 3850, y: surface - 148, w: 130, h: 148, target: index + 1, locked: true, label: '봉인의 문', destination: { x: index === 4 ? 1040 : 180, y: FLOOR } },
 ];
 
-export const ROOM_DEFS = [
+const CORE_ROOMS = [
   {
     name: '잿빛 감옥', subtitle: 'THE ASHEN CELLS', color: '#496983', decor: 'prison', spawn: { x: 180, y: FLOOR },
     platforms: [
@@ -80,7 +81,7 @@ export const ROOM_DEFS = [
     solids: [s(970, 1310, 80, 570), s(1070, 1060, 410, 100), s(2090, 550, 110, 1330), s(2210, 300, 750, 100), s(3290, 930, 110, 950), s(420, 1580, 245, 60), s(645, 1640, 20, 240)],
     exits: gates(2, 930, 930),
     enemies: [
-      e('duelist', 640, FLOOR, 300, 820), e('archer', 865, 1310, 820, 940), e('warden', 1450, FLOOR, 1230, 1770),
+      e('duelist', 600, FLOOR, 300, 820), e('archer', 865, 1310, 820, 940), e('warden', 1450, FLOOR, 1230, 1770),
       e('archer', 1690, 1120, 1650, 1790), e('duelist', 1680, 740, 1610, 1740),
       e('warden', 2280, 550, 2210, 2390, true, '금서의 여사서'), e('duelist', 2710, FLOOR, 2490, 2980),
       e('archer', 2870, 1120, 2830, 2990), e('duelist', 3740, 930, 3670, 3870),
@@ -156,3 +157,131 @@ export const ROOM_DEFS = [
     waypoints: route([[1040, FLOOR], [1380, FLOOR], [1830, FLOOR], [2250, FLOOR]]),
   },
 ];
+
+// The original vertical maze remains in the middle. Its two open flanks are
+// optional battles, so finding the sigil and defeating the guardian still opens
+// the next gate without requiring hundreds of cleanup kills.
+const translate = value => ({ ...value, x: value.x + CORE_X });
+const RIGHT_WING_X = CORE_X + CORE_W;
+const HORDE_STATS = {
+  duelist: { hp: 46, damage: 4, speed: 118 },
+  archer: { hp: 40, damage: 4, speed: 0 },
+  warden: { hp: 72, damage: 6, speed: 90 },
+};
+function hordeEnemy(kind, x, surface, min, max, wing, index) {
+  return {
+    ...e(kind, x, surface, min, max), ...HORDE_STATS[kind],
+    horde: true, hordeZone: wing, group: wing,
+    timer: .45 + index % 7 * .17,
+    name: kind === 'warden' ? '전열의 여감시관' : kind === 'archer' ? '무리의 여궁수' : '공허의 여검무사',
+  };
+}
+function wingEnemies(side, roomIndex) {
+  const east = side === 'east', offset = east ? RIGHT_WING_X : 0;
+  const result = [];
+  // A full line of foot soldiers, with enough separation for readable attacks.
+  // The western line ends before the spawn corridor and cannot pursue into it.
+  for (let i = 0; i < 24; i++) {
+    const kind = (i + roomIndex) % 8 === 3 ? 'warden' : 'duelist';
+    result.push(hordeEnemy(kind, offset + (east ? 420 : 180) + i * 65, FLOOR, offset + (east ? 340 : 100), offset + (east ? 1990 : 1830), side, i));
+  }
+  // Two raised formations can be reached by double jumps or the side stairs.
+  // Archers in the western formation stay far enough from the initial spawn.
+  for (let ledge = 0; ledge < 2; ledge++) {
+    const start = offset + (east ? ledge ? 1230 : 300 : ledge ? 990 : 140);
+    for (let i = 0; i < 6; i++) {
+      const kind = east || !ledge || !i ? 'archer' : i === 3 ? 'warden' : 'duelist';
+      result.push(hordeEnemy(kind, start + 30 + i * 100, 1500, start + 16, start + 640, side, 24 + ledge * 6 + i));
+    }
+  }
+  return result;
+}
+function floorPockets(def) {
+  const walls = [...def.solids, ...def.breakables.filter(b => b.solid)]
+    .filter(r => r.y < FLOOR && r.y + r.h >= FLOOR)
+    .map(r => ({ min: r.x, max: r.x + r.w })).sort((a, b) => a.min - b.min);
+  let cursor = 0;
+  const pockets = [];
+  for (const wall of walls) {
+    if (wall.min > cursor) pockets.push({ min: cursor, max: wall.min });
+    cursor = Math.max(cursor, wall.max);
+  }
+  if (cursor < CORE_W) pockets.push({ min: cursor, max: CORE_W });
+  return pockets.filter(r => r.max - r.min >= 350 && !(def.spawn.x >= r.min && def.spawn.x < r.max))
+    .sort((a, b) => b.max - b.min - (a.max - a.min)).slice(0, 3).sort((a, b) => a.min - b.min);
+}
+function coreReinforcements(def) {
+  const pockets = floorPockets(def), result = [];
+  for (let i = 0; i < 9; i++) {
+    const pocket = pockets[i % pockets.length], rank = Math.floor(i / pockets.length);
+    let x = pocket.min + (pocket.max - pocket.min - 40) * (rank + 1) / 4;
+    // Do not place a new body on top of an authored enemy or another soldier.
+    const occupied = [...def.enemies.filter(enemy => enemy.y === FLOOR), ...result.map(enemy => ({ ...enemy, x: enemy.x - CORE_X }))];
+    for (let n = 0; n < 8 && occupied.some(enemy => Math.abs(enemy.x - x) < 55); n++) x = Math.min(pocket.max - 58, Math.max(pocket.min + 18, x + (n % 2 ? -1 : 1) * (n + 1) * 58));
+    const kind = i % 3 === 2 ? 'warden' : 'duelist';
+    result.push(hordeEnemy(kind, CORE_X + Math.round(x), FLOOR, CORE_X + pocket.min + 12, CORE_X + pocket.max - 12, 'core', i));
+  }
+  return result;
+}
+function wingPlatforms() {
+  return [
+    p(140, 1500, 660), p(990, 1500, 700),
+    p(320, 1690, 250), p(760, 1690, 230), p(1780, 1690, 250),
+    p(1510, 1310, 250), p(1260, 1120, 250),
+    p(RIGHT_WING_X + 300, 1500, 660), p(RIGHT_WING_X + 1230, 1500, 660),
+    p(RIGHT_WING_X + 240, 1690, 250), p(RIGHT_WING_X, 1500, 250),
+    p(RIGHT_WING_X + 240, 1310, 250), p(RIGHT_WING_X, 1120, 250),
+    p(RIGHT_WING_X + 240, 930, 250), p(RIGHT_WING_X + 1220, 1690, 250),
+  ];
+}
+function expandRoom(def, index) {
+  const bossRoom = index === 5;
+  const result = {
+    ...def, width: W, core: { x: CORE_X, w: CORE_W },
+    spawn: translate(def.spawn),
+    platforms: [...def.platforms.map(translate), ...wingPlatforms()],
+    // Cathedral side pillars become arches, leaving a clear passage underneath.
+    solids: def.solids.map(rect => translate(bossRoom && rect.h === 800 ? { ...rect, h: 460 } : rect)),
+    exits: def.exits.map(exit => ({ ...translate(exit), destination: translate(exit.destination) })),
+    enemies: def.enemies.map(enemy => ({ ...translate(enemy), patrolMin: enemy.patrolMin + CORE_X, patrolMax: enemy.patrolMax + CORE_X })),
+    breakables: def.breakables.map(translate), items: def.items.map(translate), chests: def.chests.map(translate),
+    zones: def.zones.map(translate), decorations: def.decorations.map(translate), waypoints: def.waypoints.map(translate),
+    hordeZones: [
+      { id: 'west', name: '서쪽 소탕로', x: 0, y: 940, w: CORE_X, h: FLOOR - 940, entryX: CORE_X, entryY: FLOOR },
+      { id: 'east', name: '동쪽 혈전 회랑', x: RIGHT_WING_X, y: 940, w: CORE_X, h: FLOOR - 940, entryX: RIGHT_WING_X, entryY: FLOOR },
+    ],
+    routeHints: [...def.routeHints, '중앙 미로의 양옆에는 넓은 소탕 구역이 있습니다. 여러 적을 한 번에 베어내세요.'],
+  };
+  const west = wingEnemies('west', index), east = wingEnemies('east', index);
+  if (bossRoom) {
+    // Optional cathedral sentries remain outside the original queen encounter.
+    result.enemies.push(...west.filter((_, n) => [3, 9, 15, 24, 27].includes(n)), ...east.filter((_, n) => [3, 9, 24, 27].includes(n)));
+  } else {
+    result.enemies.push(...coreReinforcements(def), ...west, ...east);
+  }
+  result.hordeCount = result.enemies.filter(enemy => enemy.horde).length;
+  for (const side of ['west', 'east']) {
+    const offset = side === 'west' ? 0 : RIGHT_WING_X;
+    result.zones.push(zone(offset, 940, CORE_X, FLOOR - 940, side === 'west' ? '서쪽 소탕로' : '동쪽 혈전 회랑'));
+    result.breakables.push(prop('urn', offset + 380, FLOOR), prop('crate', offset + 1180, FLOOR), prop('urn', offset + 1480, 1500), prop('crate', offset + 560, 1500));
+    result.decorations.push(decoration('banner', offset + 120, 1320, 1.4), decoration('torch', offset + 890, 1780, 1.3), decoration('torch', offset + 1760, 1780, 1.3), decoration('chain', offset + 700, 1010, 1.7));
+  }
+  const spawn = [result.spawn.x, result.spawn.y];
+  const westRoute = [spawn, [CORE_X, FLOOR], [1600, FLOOR], [1000, FLOOR], [400, FLOOR], [100, FLOOR], [400, FLOOR], [1000, FLOOR], [1600, FLOOR], [CORE_X, FLOOR], spawn];
+  const eastFloorRoute = [[RIGHT_WING_X + 700, FLOOR], [RIGHT_WING_X + 1360, FLOOR], [W - 110, FLOOR], [RIGHT_WING_X + 1360, FLOOR], [RIGHT_WING_X + 700, FLOOR]];
+  let eastRoute;
+  if (bossRoom) {
+    eastRoute = [spawn, [3500, FLOOR], [4200, FLOOR], [5000, FLOOR], [RIGHT_WING_X, FLOOR], ...eastFloorRoute, [RIGHT_WING_X, FLOOR], [5000, FLOOR], [4200, FLOOR], [3500, FLOOR], spawn];
+  } else {
+    const gate = result.exits.find(exit => exit.locked), surface = gate.y + gate.h;
+    eastRoute = [spawn, ...result.waypoints.slice(1).map(point => [point.x, point.y]),
+      [RIGHT_WING_X + 90, 1120], ...eastFloorRoute,
+      [RIGHT_WING_X + 256, 1690], [RIGHT_WING_X + 90, 1500],
+      [RIGHT_WING_X + 256, 1310], [RIGHT_WING_X + 90, 1120], [gate.x + 40, surface],
+    ];
+  }
+  result.hordeRoutes = { left: route(westRoute), right: route(eastRoute) };
+  return result;
+}
+
+export const ROOM_DEFS = CORE_ROOMS.map(expandRoom);

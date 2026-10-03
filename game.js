@@ -1,4 +1,4 @@
-import { W, H, FLOOR, ROOM_DEFS, SKILLS, WEAPONS, RARITIES, weaponFor, skillFor, switchWeapon, equipDrop, nearbyDrop, createRun, step, attack, jump, dash, heal, interact, chooseBoon, roomFor, skill, groundSlam, shatterAt } from './engine.js?v=3';
+import { W, H, FLOOR, ROOM_DEFS, SKILLS, WEAPONS, RARITIES, weaponFor, skillFor, switchWeapon, equipDrop, nearbyDrop, createRun, step, attack, jump, dash, heal, interact, chooseBoon, roomFor, skill, groundSlam, shatterAt } from './engine.js?v=4';
 
 const $ = id => document.getElementById(id);
 const canvas = $('game'), ctx = canvas.getContext('2d', { alpha:false });
@@ -13,6 +13,7 @@ const input = { move:0, attack:false, down:false }, images = {};
 let animations = {}, objectAnimations = {}, objectTimes = new WeakMap(), gearOpen = null, gearSession = 0, lootBusy = false, lastTap = { at:0, x:0, y:0 }, renderedScale = 1, cameraOffsetX = 0, cameraOffsetY = 0;
 const ambience = Array.from({ length:52 }, (_, i) => ({ x:(i * 431 + 73) % W, y:(i * 227 + 91) % H, size:i % 3 + .5, speed:9 + i % 23, phase:i * 1.71 }));
 const weaponArt = new Map(), weaponLoads = new Map();
+let carnage = { kills:0, streak:0, until:0 };
 const assetPaths = { chest:'assets/reliquary-chest.png', portal:'assets/reliquary-portal.png', prison:'assets/bg-prison.png', cathedral:'assets/bg-cathedral.png', cover:'assets/cover.png', player:'assets/player.png', duelist:'assets/duelist.png', archer:'assets/archer.png', warden:'assets/warden.png', boss:'assets/boss.png' };
 for(const spec of WEAPONS)assetPaths['icon_'+spec.id]=`assets/arsenal-icon-${spec.id}.png`;
 
@@ -74,6 +75,7 @@ $('upgrade').onclick = () => {
 async function startRun() {
   if(!await loadWeaponArt('gun')){toast('무기 모션을 불러오지 못했습니다. 다시 시작해 주세요.');return;}
   gearOpen=null;gearSession++;lootBusy=false;state = createRun(meta); trimWeaponArt(); started = true; paused = false; mapOpen = false; lastMode = ''; lastRoom = -1; lastMessage = ''; cameraRoom = -1; objectTimes = new WeakMap();
+  carnage={kills:0,streak:0,until:0};
   menu.classList.add('hidden'); modal.classList.add('hidden'); $('hud').classList.remove('hidden'); $('map').classList.remove('hidden');
   for(const id of ['heal','skills','weapons','minimap-button','objective'])$(id).classList.remove('hidden');
   keys.clear(); pointers.clear(); input.move = 0; input.attack = false; input.down = false;
@@ -116,12 +118,12 @@ function toggleMap(){
   openModal('THE PATH YOU HAVE WALKED',roomFor(state).name,'','지도로부터 돌아가기',toggleMap);
   modal.querySelector('.modal-body').classList.add('map-modal');
   const mapCanvas=document.createElement('canvas');mapCanvas.className='full-map';mapCanvas.width=960;mapCanvas.height=480;
-  const legend=document.createElement('p');legend.className='map-legend';legend.textContent='흰 점: 아리아 · 금: 문양 · 붉은 점: 감시관 · 청록: 출구 · 빗금: 균열 · 보라: 장비';
+  const legend=document.createElement('p');legend.className='map-legend';legend.textContent='흰 점: 아리아 · 금: 문양 · 붉은 점: 감시관 · 청록: 출구 · 빗금: 균열 · 보라: 장비 · 붉은 영역: 무쌍';
   $('modal-options').append(mapCanvas,legend);drawMap(mapCanvas,true);
 }
 function returnToMenu() {
   save(); started = false; paused = false; modal.classList.add('hidden'); menu.classList.remove('hidden');
-  for (const id of ['hud','map','boss-hud','context','heal','skills','weapons','objective','minimap-button']) $(id).classList.add('hidden');
+  for (const id of ['hud','map','boss-hud','context','heal','skills','weapons','objective','minimap-button','arena-hud','kill-chain']) $(id).classList.add('hidden');
   $('room-banner').classList.remove('show'); $('start-label').textContent = '다시, 운명을 쓰기'; legacy(); $('start').focus({ preventScroll:true });
 }
 function updateMode() {
@@ -156,11 +158,19 @@ function updateHUD(now) {
   if(nearby||chest||drop){$('context').firstChild.textContent=chest?'숨겨진 보물 열기 ':activeGate?'포탈 이동 ':drop?`${drop.kind==='weapon'?'무기':'스킬'} 살펴보기 `:nearby.locked&&!room.cleared?'봉인된 문 ':'통로 이동 ';$('context').style.right='4%';$('context').style.left='auto';}
   const guards=room.enemies.filter(e=>e.guardian&&!e.dead).length;
   $('objective-label').textContent=state.room===5?'공허의 여왕을 쓰러뜨리세요':!room.keyCollected?'봉인 열쇠를 찾으세요':guards?`열쇠 획득 · 감시관 ${guards}명 남음`:'봉인 해제 · 열린 출구로 향하세요';
+  updateHordeHUD(def,room,p);
   updateLoadoutHUD();
   drawMap($('minimap'));
   $('heal').style.opacity=p.flask&&p.hp<p.maxHp?'1':'.45';
   if(state.message!==lastMessage&&state.messageTimer>0){lastMessage=state.message;toast(state.message);}
   updateMode();
+}
+function updateHordeHUD(def,room,p){
+  const zone=(def.hordeZones||[]).find(z=>p.x+p.w/2>=z.x&&p.x+p.w/2<z.x+z.w&&p.y+p.h>z.y&&p.y<z.y+z.h);
+  $('arena-hud').classList.toggle('hidden',!zone||state.mode!=='playing');
+  if(zone){const group=room.enemies.filter(e=>e.horde&&e.hordeZone===zone.id);$('arena-name').textContent=zone.name;$('arena-count').textContent=`${group.filter(e=>!e.dead).length} / ${group.length}`;}
+  if(state.kills>carnage.kills){carnage.streak=state.time<=carnage.until?carnage.streak+state.kills-carnage.kills:state.kills-carnage.kills;carnage.kills=state.kills;carnage.until=state.time+4;}
+  $('kill-chain').classList.toggle('hidden',carnage.streak<3||state.time>carnage.until||state.mode!=='playing');$('chain-count').textContent=carnage.streak;
 }
 
 window.addEventListener('keydown',e=>{
@@ -394,11 +404,20 @@ function environment(time){
   const def=roomFor(state),room=state.rooms[state.room];
   for(const d of def.decorations||[])decoration(d,time);
   for(const r of def.solids||[])masonry(r.x,r.y,r.w,r.h);
-  masonry(0,FLOOR,W,H-FLOOR);
+  masonry(0,FLOOR,def.width||W,H-FLOOR);
   for(const r of def.platforms||[]){masonry(r.x,r.y,r.w,r.h,true);if(visible(r,70)&&r.w>240)candle(r.x+r.w-20,r.y-4,time);}
   for(const b of room.breakables)breakable(b,time);
   for(const c of room.chests)chest(c,time);
   for(const gate of def.exits||[])portal(gate,time);
+  for(const zone of def.hordeZones||[])hordeEntrance(zone,time);
+}
+function hordeEntrance(zone,time){
+  const x=zone.entryX,y=zone.entryY??FLOOR,west=zone.x<x;
+  if(!visible({x:x-85,y:y-245,w:170,h:245},60))return;
+  ctx.save();ctx.translate(x,y);ctx.strokeStyle='#958164';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(0,-235);ctx.stroke();ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-48,-213);ctx.lineTo(48,-213);ctx.stroke();
+  const sway=Math.sin(time*1.7+x)*3;path([[-38,-211],[38,-211],[35+sway,-150],[sway,-163],[-35+sway,-150]],'#692c39e0');ctx.strokeStyle='#d2b084aa';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(-28,-205);ctx.lineTo(-26+sway,-164);ctx.moveTo(28,-205);ctx.lineTo(26+sway,-164);ctx.stroke();
+  path([[0,-199],[7,-185],[0,-171],[-7,-185]],'#dfbc88');glow(0,-188,55,'#e4ab661b');
+  ctx.fillStyle='#09151ddb';ctx.fillRect(-88,-134,176,42);ctx.strokeStyle='#c49b6466';ctx.strokeRect(-88,-134,176,42);ctx.textAlign='center';ctx.fillStyle='#e9c99e';ctx.font='12px sans-serif';ctx.fillText(`${west?'← ':''}${zone.name}${west?'':' →'}`,0,-116);ctx.fillStyle='#a69888';ctx.font='9px sans-serif';ctx.fillText('다수의 적 · 자유 전투',0,-101);ctx.restore();
 }
 function sprite(kind,e,time,opacity=1){
   const type=kind==='player'?(e.weaponType||weaponFor(state).type):null;
@@ -592,11 +611,13 @@ function effects(time){
   }
 }
 function drawMap(target,full=false){
-  const g=target.getContext('2d'),room=state.rooms[state.room],def=roomFor(state),sx=target.width/W,sy=target.height/H,known=(x,y)=>room.explored[Math.floor(y/128)*room.exploreCols+Math.floor(x/128)];
+  const room=state.rooms[state.room],def=roomFor(state),width=def.width||W,mapHeight=Math.round(target.width*H/width);if(target.height!==mapHeight)target.height=mapHeight;
+  const g=target.getContext('2d'),sx=target.width/width,sy=target.height/H,known=(x,y)=>room.explored[Math.floor(y/128)*room.exploreCols+Math.floor(x/128)];
   g.clearRect(0,0,target.width,target.height);g.fillStyle='#0c1a24';g.fillRect(0,0,target.width,target.height);g.save();g.scale(sx,sy);
   g.beginPath();for(let i=0;i<room.explored.length;i++)if(room.explored[i])g.rect((i%room.exploreCols)*128,Math.floor(i/room.exploreCols)*128,128,128);g.clip();
-  g.fillStyle='#233d48';g.fillRect(0,0,W,H);
-  g.fillStyle='#789a9c';for(const r of [...def.solids,{x:0,y:FLOOR,w:W,h:H-FLOOR}])g.fillRect(r.x,r.y,r.w,r.h);
+  g.fillStyle='#233d48';g.fillRect(0,0,width,H);
+  g.fillStyle='#713d4959';for(const zone of def.hordeZones||[])g.fillRect(zone.x,zone.y,zone.w,zone.h);
+  g.fillStyle='#789a9c';for(const r of [...def.solids,{x:0,y:FLOOR,w:width,h:H-FLOOR}])g.fillRect(r.x,r.y,r.w,r.h);
   g.fillStyle='#a9c6b5';for(const r of def.platforms)g.fillRect(r.x,r.y,r.w,full?r.h:18);
   for(const b of room.breakables)if(!b.broken&&(b.kind==='wall'||b.kind==='rune')){g.fillStyle='#d9ae8a';g.fillRect(b.x,b.y,b.w,b.h);g.strokeStyle='#263d44';g.lineWidth=8;for(let yy=b.y;yy<b.y+b.h;yy+=45){g.beginPath();g.moveTo(b.x,yy);g.lineTo(b.x+b.w,yy+36);g.stroke();}}
   for(const exit of def.exits){g.fillStyle=exit.locked&&!room.cleared?'#9d6179':'#a1e5e1';g.fillRect(exit.x,exit.y,exit.w,exit.h);}
@@ -617,7 +638,7 @@ function render(time,dt){
   ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#061014';ctx.fillRect(0,0,canvas.width,canvas.height);
   if(!started){menuScene(time);return;}
   const p=state.player,scale=Math.min(canvas.width/viewW,canvas.height/viewH),offsetX=(canvas.width-viewW*scale)/2,offsetY=(canvas.height-viewH*scale)/2;
-  const tx=Math.max(0,Math.min(W-viewW,p.x+p.w/2-viewW*.42+p.facing*Math.min(65,Math.abs(p.vx)*.1))),ty=Math.max(0,Math.min(H-viewH,p.y+p.h-viewH*.76+Math.max(-75,Math.min(60,p.vy*.055))));
+  const tx=Math.max(0,Math.min((roomFor(state).width||W)-viewW,p.x+p.w/2-viewW*.42+p.facing*Math.min(65,Math.abs(p.vx)*.1))),ty=Math.max(0,Math.min(H-viewH,p.y+p.h-viewH*.76+Math.max(-75,Math.min(60,p.vy*.055))));
   if(cameraRoom!==state.room){camera=tx;cameraY=ty;cameraRoom=state.room;}
   else if(!paused&&state.hitStop<=0){camera+=(tx-camera)*(1-Math.exp(-10*dt));cameraY+=(ty-cameraY)*(1-Math.exp(-9*dt));}
   const shake=!reducedMotion&&state.shake>0?state.shake*31:0,shakeX=Math.sin(time*170)*shake,shakeY=Math.cos(time*143)*shake*.65;
@@ -630,7 +651,7 @@ function frame(now){
   const dt=Math.min(.035,(now-lastTime)/1000||1/60);lastTime=now;
   if(started&&!paused&&state.mode==='playing')step(state,readInput(),dt);
   else if(started&&!paused)step(state,{},dt);
-  for(const event of state.events.splice(0))sound(event);
+  for(const event of new Set(state.events.splice(0)))sound(event);
   music(now/1000);render(now/1000,dt);
   if(now-uiAt>90){uiAt=now;updateHUD(now);}
   requestAnimationFrame(frame);

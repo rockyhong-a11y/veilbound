@@ -1,23 +1,84 @@
 import assert from 'node:assert/strict';
-import { W, H, FLOOR, MAP_CELL, ROOM_DEFS, WEAPONS, SKILLS, RARITIES, weaponFor, skillFor, switchWeapon, equipDrop, nearbyDrop, createRun, step, attack, jump, dash, skill, groundSlam, shatterAt, heal, interact, chooseBoon } from './engine.js';
+import { W, H, FLOOR, MAP_CELL, ROOM_DEFS, DROP_RATES, WEAPONS, SKILLS, RARITIES, weaponFor, skillFor, switchWeapon, equipDrop, nearbyDrop, createRun, step, attack, jump, dash, skill, groundSlam, shatterAt, heal, interact, chooseBoon } from './engine.js';
 
 const tick = (s, seconds, input = {}) => { for (let t = 0; t < seconds - 1e-9; t += 1 / 60) step(s, input, 1 / 60); };
 const fresh = () => createRun({ seed: 7 });
 const quiet = s => { for (const e of s.rooms[s.room].enemies) { e.dead = true; e.hp = 0; } };
-const place = (s, x, surface = FLOOR) => Object.assign(s.player, { x, y: surface - s.player.h, vx: 0, vy: 0, onGround: true, jumps: 0, coyote: .1 });
+const CORE_X = (W - 4096) / 2;
+const placeAt = (s, x, surface = FLOOR) => Object.assign(s.player, { x, y: surface - s.player.h, vx: 0, vy: 0, onGround: true, jumps: 0, coyote: .1 });
+const place = (s, x, surface = FLOOR) => placeAt(s, x + CORE_X, surface);
 const target = (s, index, x, hp = 999, surface = FLOOR) => {
   const e = s.rooms[s.room].enemies[index];
-  Object.assign(e, { x, y: surface - e.h, hp, maxHp: hp, dead: false, speed: 0, timer: 999, phase: 'idle', stagger: 0, vx: 0, vy: 0, onGround: true });
+  Object.assign(e, { x: x + CORE_X, y: surface - e.h, hp, maxHp: hp, dead: false, speed: 0, timer: 999, phase: 'idle', stagger: 0, vx: 0, vy: 0, onGround: true });
   return e;
 };
 const settledAttack = s => { for (let i = 0; i < 90 && (s.player.attackTimer > 0 || s.hitStop > 0); i++) step(s); };
+// Controlled enemy bodies still die through the public attack/collision path.
+// Keeping each sample isolated prevents earlier corpses, cooldowns and loot from
+// affecting the next roll without substituting a fake drop implementation.
+const killOne = s => {
+  place(s, 180); target(s, 0, 280, 1);
+  Object.assign(s.player, { facing: 1, attackTimer: 0, attackPending: null, attackQueued: 0, castTimer: 0, combo: 0, comboWindow: 0 });
+  s.hitStop = 0; s.particles = []; s.impacts = []; s.damageTexts = []; s.projectiles = []; s.events = [];
+  const kills = s.kills; assert.ok(attack(s)); tick(s, .09);
+  assert.equal(s.kills, kills + 1, 'the sample is an actual combat kill');
+};
 
 assert.equal(ROOM_DEFS.length, 6);
-assert.deepEqual([W, H, FLOOR, MAP_CELL], [4096, 2048, 1880, 128]);
+assert.deepEqual([W, H, FLOOR, MAP_CELL], [8192, 2048, 1880, 128]);
 assert.equal(createRun(null).meta.runs, 1);
 assert.deepEqual(fresh().rooms, fresh().rooms, 'seeded runs have the same enemies, loot and explored cells');
 assert.equal(createRun({ embers: -4, power: Infinity }).meta.power, 0, 'stored progression is validated');
 assert.ok(ROOM_DEFS.slice(0, 5).every(r => r.waypoints.length >= 20 && r.solids.length >= 5 && r.chests.some(c => c.secret)), 'every maze has a vertical route, solid walls and a secret reward');
+
+{
+  const s = fresh();
+  assert.deepEqual(ROOM_DEFS.map(r => r.enemies.length), [90, 90, 90, 90, 90, 10], 'each room has exactly ten times its original enemy count');
+  assert.equal(s.rooms.reduce((sum, room) => sum + room.enemies.length, 0), 460);
+  assert.equal(s.rooms[5].enemies.filter(e => e.kind === 'boss').length, 1, 'the cathedral retains one queen plus nine regular enemies');
+  for (let r = 0; r < ROOM_DEFS.length; r++) {
+    const def = ROOM_DEFS[r], room = s.rooms[r];
+    assert.equal(def.width, W); assert.deepEqual(def.core, { x: CORE_X, w: 4096 });
+    assert.equal(room.exploreCols, 64, 'exploration cells cover the full expanded width');
+    assert.equal(def.hordeZones.length, 2); assert.deepEqual(def.hordeZones.map(z => z.id), ['west', 'east']);
+    for (const e of room.enemies) {
+      assert.ok(e.x >= 18 && e.x + e.w <= W - 18, `enemy remains in world bounds in ${def.name}`);
+      assert.ok(!def.solids.some(w => e.x < w.x + w.w && e.x + e.w > w.x && e.y < w.y + w.h && e.y + e.h > w.y), `enemy does not spawn inside solid masonry in ${def.name}`);
+      assert.ok(e.x >= e.patrolMin && e.x + e.w <= e.patrolMax, `enemy patrol contains its whole body in ${def.name}`);
+      assert.ok(e.y + e.h === FLOOR || [...def.platforms, ...def.solids].some(w => Math.abs(w.y - e.y - e.h) < .01 && e.x < w.x + w.w && e.x + e.w > w.x), `enemy starts on a real supporting surface in ${def.name}`);
+    }
+    assert.ok(def.exits.every(g => g.x >= CORE_X && g.x + g.w <= CORE_X + 4096), 'original portal progression stays in the central maze');
+  }
+}
+
+// Topology checks use ordinary movement and jumps, with combat isolated below.
+// Each route starts at the real room spawn and crosses the central maze into a
+// side corridor; every point must be reached physically, without teleporting.
+{
+  let visited = 0;
+  for (let r = 0; r < ROOM_DEFS.length; r++) for (const side of ['left', 'right']) {
+    const s = fresh(); s.room = r; quiet(s); const def = ROOM_DEFS[r], route = def.hordeRoutes[side];
+    placeAt(s, def.spawn.x, def.spawn.y);
+    assert.ok(route.length >= 3 && route[0].x === def.spawn.x && route[0].y === def.spawn.y, 'a horde route connects to the real spawn');
+    for (const goal of route.slice(1)) {
+      let budget = 2400, jumpAge = 0, second = false;
+      while (!(s.player.onGround && Math.abs(s.player.x - goal.x) < 9 && Math.abs(s.player.y + s.player.h - goal.y) < 2)) {
+        const p = s.player, foot = p.y + p.h, dx = goal.x - p.x;
+        const move = Math.abs(dx) < 3 ? 0 : Math.sign(dx) * Math.min(1, Math.abs(dx) / 16);
+        let jumpInput = false;
+        if (p.onGround && (goal.y < foot - 8 || (Math.abs(goal.y - foot) < 3 && Math.abs(dx) > 80))) { jumpInput = true; jumpAge = 0; second = false; }
+        else if (!p.onGround && !second && p.jumps === 1 && jumpAge >= 20) { jumpInput = true; second = true; }
+        step(s, { move, jump: jumpInput, down: p.onGround && goal.y > foot + 8 && (goal.y === FLOOR || Math.abs(dx) < 20) }, 1 / 60); jumpAge++;
+        if (s.mode === 'boon') assert.ok(chooseBoon(s, 0));
+        assert.ok(budget-- > 0, `physical horde route ${r}/${side} to ${goal.x},${goal.y}; player at ${p.x.toFixed(1)},${(p.y + p.h).toFixed(1)}`);
+      }
+      visited++;
+    }
+    const wing = def.hordeZones.find(z => z.id === (side === 'left' ? 'west' : 'east'));
+    assert.ok(route.some(p => p.x > wing.x + 60 && p.x < wing.x + wing.w - 60), `route enters the ${side} wing`);
+  }
+  console.log(`Expanded terrain passed: ${visited} physical route stops across both wings of all six rooms.`);
+}
 
 {
   const s = fresh(); quiet(s);
@@ -38,7 +99,7 @@ assert.ok(ROOM_DEFS.slice(0, 5).every(r => r.waypoints.length >= 20 && r.solids.
   place(s, 565, 1690); tick(s, .08, { move: 1 }); assert.equal(s.player.onGround, false);
   assert.ok(s.player.coyote > 0 && jump(s), 'walking off a ledge leaves a coyote jump');
   place(s, 828); s.player.facing = 1; assert.ok(dash(s)); tick(s, .2);
-  assert.equal(s.player.x, 920 - s.player.w, 'a fast dash cannot tunnel through masonry');
+  assert.equal(s.player.x, CORE_X + 920 - s.player.w, 'a fast dash cannot tunnel through masonry');
   assert.equal(dash(s), false); tick(s, .4); assert.ok(dash(s), 'dash cooldown recovers');
   const e = target(s, 0, 1120, 999, 1280); e.vy = -680;
   tick(s, .15); assert.ok(e.y >= 1130, 'enemy physics also respects ceilings');
@@ -68,10 +129,43 @@ assert.ok(ROOM_DEFS.slice(0, 5).every(r => r.waypoints.length >= 20 && r.solids.
   assert.equal(first.hp, 999 - Math.round(s.damage * 2.7)); assert.equal(second.hp, first.hp, 'crimson wave pierces each target once');
   assert.ok(s.player.skillCooldowns[0] > 3.7); tick(s, SKILLS[0].cooldown); assert.ok(skill(s, 0));
   const storm = fresh(); quiet(storm); const near = target(storm, 0, 300), far = target(storm, 3, 650); place(storm, 180);
-  storm.projectiles.push({ x: 250, y: 1800, vx: 0, vy: 0, w: 10, h: 10, life: 3, enemy: true, damage: 12 });
+  storm.projectiles.push({ x: CORE_X + 250, y: 1800, vx: 0, vy: 0, w: 10, h: 10, life: 3, enemy: true, damage: 12 });
   assert.ok(skill(storm, 1)); assert.equal(near.hp, 999 - Math.round(storm.damage * 3.4)); assert.equal(far.hp, 999);
   assert.equal(storm.projectiles.length, 0, 'storm destroys nearby hostile projectiles'); assert.ok(storm.impacts.some(e => e.kind === 'storm'));
   assert.equal(skill(storm, 1), false);
+}
+{
+  const s = fresh(); quiet(s); place(s, 180);
+  const crowd = Array.from({ length: 6 }, (_, i) => target(s, i, 285 + i * 60, 80));
+  assert.ok(skill(s, 0)); tick(s, .7);
+  assert.ok(crowd.every(e => e.dead), 'one piercing wave can defeat a six-enemy crowd');
+  assert.equal(s.kills, 6); assert.ok(s.particles.length <= 480 && s.impacts.length <= 30 && s.damageTexts.length <= 30, 'crowd effects remain bounded');
+  const melee = fresh(); quiet(melee); place(melee, 180);
+  const packed = [270, 295, 325].map((x, i) => target(melee, i, x));
+  attack(melee); tick(melee, .06);
+  assert.ok(packed.every(e => e.hp === 999 - melee.damage), 'a single sword swing hits every enemy in its arc');
+}
+{
+  const s = fresh(); placeAt(s, 1000); s.player.facing = 1;
+  assert.ok(skill(s, 1)); assert.ok(skill(s, 0));
+  for (let frame = 0; frame < 180; frame++) {
+    step(s, { attack: true, move: frame % 80 < 40 ? .25 : -.25 }, 1 / 60);
+    assert.equal(s.mode, 'playing', 'the real crowd encounter remains survivable with ordinary equipment');
+    assert.ok(s.particles.length <= 480 && s.impacts.length <= 30 && s.damageTexts.length <= 30, 'live crowd combat keeps visual effects bounded');
+  }
+  assert.ok(s.kills >= 12, `a three-second battle defeats a real horde with default HP and weapons (${s.kills} kills)`);
+  assert.equal(s.rooms[0].enemies.filter(e => e.dead && e.hordeZone === 'west').length, s.kills, 'the encounter defeats actual western-wing soldiers');
+  assert.equal(s.rooms[0].enemyActivity.awake + s.rooms[0].enemyActivity.sleeping, 90 - s.kills);
+}
+{
+  const s = fresh(); quiet(s); place(s, 180);
+  const far = target(s, 0, 200 - CORE_X); far.bleed = 2; far.bleedTick = 0; far.bleedDamage = 5; far.freeze = 1;
+  const x = far.x, y = far.y; tick(s, .8);
+  assert.ok(far.sleeping && far.hp < 999 && far.freeze < .5, 'sleeping crowds keep bleed damage and freeze duration progressing');
+  assert.equal(far.x, x); assert.equal(far.y, y, 'distant idle enemy bodies do not need physics updates');
+  assert.equal(s.rooms[0].enemyActivity.sleeping, 1); assert.equal(s.rooms[0].enemyActivity.awake, 0);
+  placeAt(s, far.x + 180); step(s);
+  assert.equal(far.sleeping, false, 'walking into range wakes the same enemy');
 }
 {
   const s = fresh(); quiet(s); const e = target(s, 0, 250); place(s, 180);
@@ -89,17 +183,17 @@ assert.ok(ROOM_DEFS.slice(0, 5).every(r => r.waypoints.length >= 20 && r.solids.
   const lootCount = s.rooms[0].items.length; assert.equal(shatterAt(s, wall.x + 10, wall.y + 10), false); assert.equal(s.rooms[0].items.length, lootCount);
   assert.ok(s.impacts.some(e => e.kind === 'touch'), 'empty-space taps still spark');
   for (let i = 0; i < 90; i++) shatterAt(s, 180, 1800); assert.ok(s.particles.length <= 480, 'touch debris is bounded');
-  const blade = s.rooms[0].chests.find(c => c.reward === 'blade'); place(s, blade.x, blade.y + blade.h);
+  const blade = s.rooms[0].chests.find(c => c.reward === 'blade'); placeAt(s, blade.x, blade.y + blade.h);
   const damage = s.damage; assert.ok(shatterAt(s, blade.x + 20, blade.y + 20)); assert.equal(s.damage, damage + 5);
-  const vitality = s.rooms[0].chests.find(c => c.reward === 'vitality'); place(s, vitality.x, vitality.y + vitality.h);
+  const vitality = s.rooms[0].chests.find(c => c.reward === 'vitality'); placeAt(s, vitality.x, vitality.y + vitality.h);
   const hp = s.player.maxHp; assert.ok(interact(s)); assert.equal(s.player.maxHp, hp + 15);
-  const tempo = s.rooms[0].chests.find(c => c.reward === 'tempo'); place(s, tempo.x, tempo.y + tempo.h);
+  const tempo = s.rooms[0].chests.find(c => c.reward === 'tempo'); placeAt(s, tempo.x, tempo.y + tempo.h);
   const cooldown = s.attackCooldown; assert.ok(interact(s)); assert.ok(s.attackCooldown < cooldown);
 }
 {
   const s = fresh(); quiet(s); assert.ok(skill(s, 0)); assert.ok(skill(s, 1));
   s.player.cooldownsBySkill.meteor = 8; s.player.flask = 1;
-  const chest = s.rooms[0].chests[0]; chest.relic = 'storm'; place(s, chest.x, chest.y + chest.h);
+  const chest = s.rooms[0].chests[0]; chest.relic = 'storm'; placeAt(s, chest.x, chest.y + chest.h);
   assert.ok(interact(s)); assert.equal(s.player.flask, 2);
   assert.deepEqual(s.player.skillCooldowns, [0, 0]);
   assert.equal(skillFor(s, 0).remaining, 0); assert.equal(skillFor(s, 1).remaining, 0);
@@ -111,11 +205,11 @@ assert.ok(ROOM_DEFS.slice(0, 5).every(r => r.waypoints.length >= 20 && r.solids.
 }
 {
   const s = fresh(), gate = ROOM_DEFS[0].exits[0], guard = s.rooms[0].enemies.find(e => e.guardian);
-  place(s, gate.x, gate.y + gate.h); assert.equal(interact(s), false, 'forward gate requires its sigil and guardian');
+  placeAt(s, gate.x, gate.y + gate.h); assert.equal(interact(s), false, 'forward gate requires its sigil and guardian');
   s.rooms[0].keyCollected = true; step(s); assert.equal(s.mode, 'playing'); guard.dead = true; guard.hp = 0; step(s); assert.equal(s.mode, 'boon');
   assert.ok(s.rooms[0].enemies.some(e => !e.dead), 'optional enemies do not block exploration');
   assert.equal(chooseBoon(s, 9), false); assert.ok(chooseBoon(s, 0)); assert.ok(interact(s)); assert.equal(s.room, 1);
-  const back = ROOM_DEFS[1].exits.find(e => e.target === 0); place(s, back.x, back.y + back.h);
+  const back = ROOM_DEFS[1].exits.find(e => e.target === 0); placeAt(s, back.x, back.y + back.h);
   assert.ok(interact(s)); assert.equal(s.room, 0); assert.equal(s.player.y + s.player.h, gate.y + gate.h, 'backtracking arrives at the real elevated gate');
 }
 {
@@ -174,13 +268,21 @@ const armed = type => {
   attack(wall); tick(wall, .4); assert.equal(behind.hp, 999, 'bullets stop on solid masonry before an enemy behind it');
 }
 {
+  const s = armed('gun'), e = target(s, 0, 500);
+  s.projectiles.push({ x: CORE_X + 300, y: FLOOR - 55, vx: 6000, vy: 0, w: 10, h: 8, life: 1, kind: 'bullet', enemy: false, damage: 20, color: '#fff', facing: 1, hits: [], broken: [], pierce: 1 });
+  step(s, {}, .05); assert.equal(e.hp, 979, 'a projectile crossing the whole body in one long frame still hits');
+  const blocked = armed('gun'), behind = target(blocked, 0, 1100);
+  blocked.projectiles.push({ x: CORE_X + 750, y: FLOOR - 55, vx: 10000, vy: 0, w: 10, h: 8, life: 1, kind: 'bullet', enemy: false, damage: 20, color: '#fff', facing: 1, hits: [], broken: [], pierce: 1 });
+  step(blocked, {}, .05); assert.equal(behind.hp, 999); assert.equal(blocked.projectiles.length, 0, 'the earliest wall crossing wins over a later enemy crossing');
+}
+{
   const s = armed('bow'), a = target(s, 0, 400), b = target(s, 3, 590);
   attack(s); tick(s, .55); assert.ok(a.hp < 999 && b.hp < 999, 'arrows pierce two aligned enemies');
 }
 {
   const s = armed('harpoon'), e = target(s, 0, 610);
   attack(s); tick(s, .57); assert.ok(e.hp < 999 && e.pull, 'a harpoon embeds its pull status');
-  tick(s, .5); assert.ok(e.x < 370, 'the hooked enemy actually moves toward the player');
+  tick(s, .5); assert.ok(e.x < CORE_X + 370, 'the hooked enemy actually moves toward the player');
 }
 {
   const s = armed('greatsword'), e = target(s, 0, 390);
@@ -193,41 +295,69 @@ const armed = type => {
   const hp = e.hp; tick(s, .8); assert.ok(e.hp < hp, 'bleed causes additional damage without another swing');
 }
 {
-  const s = fresh(); quiet(s); const e = target(s, 0, 280, 1); place(s, 180);
-  attack(s); tick(s, .55);
-  assert.equal(s.kills, 1); const first = s.rooms[0].gearDrops.find(d => d.source === 'enemy');
-  assert.equal(first.type, 'gauntlet'); assert.equal(first.kind, 'weapon'); assert.ok(first.onGround, 'first kill drops a physical, reachable weapon');
-  place(s, first.x); assert.equal(nearbyDrop(s).id, first.id); assert.equal(equipDrop(s, first.id, 2), false);
+  const s = fresh(); quiet(s);
+  let first;
+  for (let tries = 0; !first && tries < 250; tries++) { killOne(s); first = s.rooms[0].gearDrops.find(d => d.kind === 'weapon'); }
+  assert.ok(first, 'a seeded sequence eventually gives an inspectable weapon');
+  assert.equal(first.type, 'gauntlet'); assert.equal(first.kind, 'weapon');
+  s.rooms[0].gearDrops = [first]; tick(s, .55);
+  assert.ok(first.onGround, 'a successful drop is physical and reachable');
+  placeAt(s, first.x); assert.equal(nearbyDrop(s).id, first.id); assert.equal(equipDrop(s, first.id, 2), false);
   assert.ok(equipDrop(s, first.id, 0)); assert.equal(s.player.weapons.length, 2); assert.equal(weaponFor(s).type, 'gauntlet');
   const discarded = s.rooms[0].gearDrops.find(d => d.source === 'replaced');
   assert.equal(discarded.type, 'sword'); assert.equal(discarded.rarity, 'common'); assert.equal(equipDrop(s, first.id, 1), false, 'a picked drop cannot be duplicated');
-  tick(s, .5); place(s, discarded.x); assert.ok(equipDrop(s, discarded.id, 1));
+  tick(s, .5); placeAt(s, discarded.x); assert.ok(equipDrop(s, discarded.id, 1));
   assert.deepEqual(s.player.weapons.map(w => w.type), ['gauntlet', 'sword'], 'two slots remain after replacing and reclaiming gear');
   place(s, 1600); assert.equal(nearbyDrop(s), null); assert.equal(equipDrop(s, s.rooms[0].gearDrops.find(d => !d.collected).id, 0), false, 'equipment cannot be taken remotely');
-  assert.ok(s.rooms[0].enemies[0] === e && e.dead);
+  assert.ok(s.rooms[0].enemies[0].dead);
+  const counts = { ...s.gearCounts };
+  for (let swaps = 0; swaps < 100; swaps++) {
+    const loose = s.rooms[0].gearDrops.find(d => !d.collected && d.source === 'replaced');
+    assert.ok(loose, 'discarded equipment always remains available');
+    placeAt(s, loose.x, loose.y + loose.h); s.player.facing = swaps % 2 ? 1 : -1;
+    assert.ok(equipDrop(s, loose.id, 1));
+    assert.equal(s.rooms[0].gearDrops.filter(d => !d.collected).length, 1, 'each replacement reliably creates exactly one recoverable old weapon');
+  }
+  assert.deepEqual(s.gearCounts, counts, 'replacing and reclaiming gear never changes random drop counters');
 }
 {
   const s = fresh(); quiet(s);
-  for (let i = 0; i < 16; i++) {
-    place(s, 180); target(s, 0, 280, 1); s.player.attackTimer = 0; s.player.comboWindow = 0;
-    attack(s); tick(s, .4); settledAttack(s);
+  assert.deepEqual(DROP_RATES, { weapon: .1, skill: .05, chest: .1 }, 'drop rates are one tenth of the previous weapon/skill/chest rates');
+  const samples = 5000, counts = { weapon: 0, skill: 0, both: 0, oddSkill: 0, evenSkill: 0 }, drops = [];
+  for (let i = 0; i < samples; i++) {
+    s.rooms[0].gearDrops = []; killOne(s);
+    const next = s.rooms[0].gearDrops;
+    const weapon = next.find(d => d.kind === 'weapon'), ability = next.find(d => d.kind === 'skill');
+    if (weapon) counts.weapon++;
+    if (ability) { counts.skill++; counts[i % 2 ? 'evenSkill' : 'oddSkill']++; }
+    if (weapon && ability) counts.both++;
+    drops.push(...next);
   }
-  const drops = s.rooms[0].gearDrops;
+  s.rooms[0].gearDrops = drops;
+  assert.ok(Math.abs(counts.weapon / samples - .1) < .015, `weapon sample rate ${counts.weapon}/${samples}`);
+  assert.ok(Math.abs(counts.skill / samples - .05) < .012, `skill sample rate ${counts.skill}/${samples}`);
+  assert.ok(counts.both > 5 && counts.both < 60, 'weapon and skill successes can occur independently on the same enemy');
+  assert.ok(counts.oddSkill > 70 && counts.evenSkill > 70, 'skills roll on every kill rather than only even numbered kills');
   assert.equal(new Set(drops.filter(d => d.kind === 'weapon').map(d => d.type)).size, 8, 'enemy kills cycle through all eight weapon families');
   assert.equal(new Set(drops.filter(d => d.kind === 'skill').map(d => d.type)).size, 8, 'enemy kills drop all eight abilities');
+  for (const [kind, catalog] of [['weapon', WEAPONS], ['skill', SKILLS]]) {
+    const distribution = catalog.map(spec => drops.filter(d => d.kind === kind && d.type === spec.id).length);
+    assert.ok(Math.max(...distribution) - Math.min(...distribution) <= 1, 'successful drops rotate across the complete catalog without kill-number modulo bias');
+  }
   assert.ok(drops.some(d => d.rarity !== 'common'));
-  const meteor = drops.find(d => d.kind === 'skill' && d.type === 'meteor'); place(s, meteor.x, meteor.y + meteor.h);
+  console.log(`Drop sampling passed: ${samples} actual kills, ${counts.weapon} weapons (${(counts.weapon / samples * 100).toFixed(1)}%), ${counts.skill} abilities (${(counts.skill / samples * 100).toFixed(1)}%).`);
+  const meteor = drops.find(d => d.kind === 'skill' && d.type === 'meteor'); placeAt(s, meteor.x, meteor.y + meteor.h);
   assert.ok(equipDrop(s, meteor.id, 0)); assert.equal(skillFor(s, 0).id, 'meteor'); assert.equal(s.player.skills.length, 2);
   assert.ok(skill(s, 0)); const remaining = s.player.skillCooldowns[0];
-  const crimson = drops.find(d => d.source === 'replaced' && d.type === 'crimson'); place(s, crimson.x, crimson.y + crimson.h);
+  const crimson = drops.find(d => d.source === 'replaced' && d.type === 'crimson'); placeAt(s, crimson.x, crimson.y + crimson.h);
   assert.ok(equipDrop(s, crimson.id, 0));
-  const meteorAgain = drops.find(d => d.source === 'replaced' && d.type === 'meteor'); place(s, meteorAgain.x, meteorAgain.y + meteorAgain.h);
+  const meteorAgain = drops.find(d => d.source === 'replaced' && d.type === 'meteor'); placeAt(s, meteorAgain.x, meteorAgain.y + meteorAgain.h);
   assert.ok(equipDrop(s, meteorAgain.id, 0)); assert.equal(s.player.skillCooldowns[0], remaining);
   assert.equal(skill(s, 0), false, 'swapping abilities does not reset their cooldown');
-  const storm = drops.find(d => d.kind === 'skill' && d.type === 'storm'); place(s, storm.x, storm.y + storm.h);
+  const storm = drops.find(d => d.kind === 'skill' && d.type === 'storm'); placeAt(s, storm.x, storm.y + storm.h);
   assert.equal(equipDrop(s, storm.id, 0), false, 'the same ability cannot fill both slots');
   const weapons = structuredClone(s.player.weapons), skills = [...s.player.skills], gate = ROOM_DEFS[0].exits[0];
-  s.rooms[0].cleared = true; place(s, gate.x, gate.y + gate.h); assert.ok(interact(s));
+  s.rooms[0].cleared = true; placeAt(s, gate.x, gate.y + gate.h); assert.ok(interact(s));
   assert.deepEqual(s.player.weapons, weapons); assert.deepEqual(s.player.skills, skills); assert.equal(s.player.cooldownsBySkill.meteor, remaining, 'loadouts and cooldowns survive a portal');
   assert.equal(s.rooms[0].gearDrops, drops, 'unclaimed equipment stays in its original room');
 }
@@ -257,11 +387,11 @@ const ability = id => { const s = fresh(); quiet(s); place(s, 180); s.player.ski
 {
   const s = ability('grapnel'), e = target(s, 0, 600);
   assert.ok(skill(s)); tick(s, .35); assert.ok(e.pull && e.hp < 999); tick(s, .6);
-  assert.ok(e.x < 360, 'the chain skill actually pulls a distant enemy');
+  assert.ok(e.x < CORE_X + 360, 'the chain skill actually pulls a distant enemy');
 }
 {
   const s = ability('ward'); assert.ok(skill(s)); assert.equal(s.player.wardTimer, 4);
-  s.projectiles.push({ x: 240, y: s.player.y + 30, vx: -470, vy: 0, w: 22, h: 7, life: 1, kind: 'arrow', enemy: true, damage: 20 });
+  s.projectiles.push({ x: CORE_X + 240, y: s.player.y + 30, vx: -470, vy: 0, w: 22, h: 7, life: 1, kind: 'arrow', enemy: true, damage: 20 });
   tick(s, .1); assert.equal(s.player.hp, 120); assert.ok(s.player.wardHP < 65 && s.projectiles.length === 0, 'ward intercepts a real incoming projectile');
   tick(s, 4); assert.equal(s.player.wardTimer, 0);
   s.projectiles.push({ x: s.player.x, y: s.player.y, vx: 0, vy: 0, w: 32, h: 90, life: 1, enemy: true, damage: 10 });
@@ -277,9 +407,17 @@ const ability = id => { const s = fresh(); quiet(s); place(s, 180); s.player.ski
   assert.ok(shield.player.wardHP > 90, 'epic ability gear grants real shield capacity');
 }
 {
-  const s = fresh(); quiet(s); const chest = s.rooms[0].chests.find(c => c.secret); place(s, chest.x, chest.y + chest.h);
-  assert.ok(interact(s)); assert.equal(s.rooms[0].gearDrops.filter(d => d.source === 'chest').length, 2);
-  assert.ok(s.rooms[0].gearDrops.filter(d => d.source === 'chest').every(d => d.rarity === 'epic'), 'a hidden chest grants two inspectable epic gear drops');
+  const s = fresh(); quiet(s); const chest = s.rooms[0].chests.find(c => c.secret); placeAt(s, chest.x, chest.y + chest.h);
+  chest.relic = 'blade'; const damage = s.damage, samples = 1000, counts = { weapon: 0, skill: 0 }, items = [];
+  for (let i = 0; i < samples; i++) {
+    chest.opened = false; s.rooms[0].gearDrops = []; s.rooms[0].items = []; s.particles = []; s.impacts = []; s.events = [];
+    assert.ok(interact(s)); assert.ok(chest.opened);
+    for (const drop of s.rooms[0].gearDrops) { assert.equal(drop.source, 'chest'); assert.equal(drop.rarity, 'epic'); counts[drop.kind]++; }
+    items.push(...s.rooms[0].items);
+  }
+  assert.equal(s.damage, damage + samples * 5, 'a chest always grants its authored stat relic even when neither equipment roll succeeds');
+  assert.equal(items.filter(i => i.kind === 'gold').length, samples); assert.equal(items.filter(i => i.kind === 'ember').length, samples, 'a chest always releases currency loot');
+  assert.ok(Math.abs(counts.weapon / samples - .1) < .035 && Math.abs(counts.skill / samples - .1) < .035, 'each hidden-chest equipment roll is ten percent');
 }
 
 // The full campaign uses live enemies and the same gestures/skills as the browser.
