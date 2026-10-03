@@ -6,7 +6,7 @@ const stage = $('stage'), menu = $('menu'), modal = $('modal');
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let meta = {}, storageOK = true;
 try { const saved = JSON.parse(localStorage.getItem('veilbound-v1') || '{}'); meta = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {}; } catch { storageOK = false; }
-let state = createRun(meta), started = false, paused = false, camera = 0, cameraY = 180, viewW = W, lastRoom = -1;
+let state = createRun(meta), started = false, paused = false, camera = 0, cameraY = 180, viewW = W, viewH = 720, lastRoom = -1;
 let lastTime = 0, uiAt = 0, bannerUntil = 0, lastMode = '', lastMessage = '', soundOn = false, audio, musicAt = 0, musicStep = 0;
 const keys = new Set(), pointers = new Map();
 const input = { move:0, attack:false }, images = {};
@@ -20,7 +20,7 @@ function save() {
 function resize() {
   const rect = stage.getBoundingClientRect(), ratio = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = Math.round(rect.width * ratio); canvas.height = Math.round(rect.height * ratio);
-  viewW = Math.min(W, 720 * rect.width / rect.height);
+  viewH = Math.min(720, 1280 * rect.height / rect.width); viewW = viewH * rect.width / rect.height;
 }
 new ResizeObserver(resize).observe(stage);
 
@@ -242,7 +242,7 @@ function effects(time){
   for(const a of ambience){const x=(a.x+Math.sin(time*.12+a.phase)*35)%W,y=(a.y-time*a.speed*.25+H*100)%H;ctx.fillStyle=a.size>2?'#d4b98844':'#ceddd528';ctx.fillRect(x,y,a.size,a.size);}
 }
 function menuScene(time){
-  ctx.save();const scale=Math.max(canvas.width/W,canvas.height/H);ctx.translate((canvas.width-W*scale)*.63,(canvas.height-H*scale)/2);ctx.scale(scale,scale);background(time,true);
+  ctx.save();const scale=Math.max(canvas.width/W,canvas.height/H);ctx.translate((canvas.width-W*scale)*.8,(canvas.height-H*scale)/2);ctx.scale(scale,scale);background(time,true);
   if(images.cover){ctx.drawImage(images.cover,0,0,W,H);ctx.fillStyle='#07111522';ctx.fillRect(0,0,W,H);}
   else{masonry(0,785,W,115);glow(1140,450,430,'#58777725');if(images.player){const hero={x:1050,y:125,w:200,h:660,facing:-1,onGround:true,vx:0,attackTimer:0,dashTimer:0,invulnerable:0};sprite('player',hero,time,5.4);}candle(870,782,time);candle(1365,782,time);}
   effects(time);ctx.restore();
@@ -250,8 +250,8 @@ function menuScene(time){
 function render(time){
   ctx.setTransform(1,0,0,1,0,0);ctx.fillStyle='#061014';ctx.fillRect(0,0,canvas.width,canvas.height);
   if(!started){menuScene(time);return;}
-  const scale=Math.min(canvas.width/viewW,canvas.height/720),offsetY=(canvas.height-720*scale)/2;
-  const target=Math.max(0,Math.min(W-viewW,state.player.x+state.player.w/2-viewW*.42));camera+=(target-camera)*.12;cameraY+=(Math.max(0,Math.min(H-720,state.player.y+state.player.h-576))-cameraY)*.08;
+  const scale=Math.min(canvas.width/viewW,canvas.height/viewH),offsetY=(canvas.height-viewH*scale)/2;
+  const target=Math.max(0,Math.min(W-viewW,state.player.x+state.player.w/2-viewW*.42));camera+=(target-camera)*.12;cameraY+=(Math.max(0,Math.min(H-viewH,state.player.y+state.player.h-viewH*.8))-cameraY)*.08;
   const shake=!reducedMotion&&state.shake>0?state.shake*35:0;
   ctx.save();ctx.translate((canvas.width-viewW*scale)/2-camera*scale+Math.sin(time*170)*shake,offsetY-cameraY*scale+Math.cos(time*143)*shake*.5);ctx.scale(scale,scale);
   background(time);environment(time);pickups(time);characters(time);effects(time);ctx.restore();
