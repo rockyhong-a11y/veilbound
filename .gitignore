@@ -1,0 +1,7 @@
+dist/
+node_modules/
+.DS_Store
+.vercel/
+artifacts/
+assets/frames/
+*.blend1

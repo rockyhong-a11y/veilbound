@@ -1,0 +1,45 @@
+{
+  "project": "VEILBOUND",
+  "created_at": "2026-10-03",
+  "higgsfield": {
+    "provider": "Higgsfield",
+    "tool": "mcp__codex_apps__higgsfield_generate_image_batch",
+    "model": "gpt_image_2_5",
+    "attempt_status": "unknown",
+    "description": "A three-image batch produced no job IDs or confirmed generation result. The unresponsive call was interrupted after 880 seconds and not repeated. Final assets were generated with the built-in image generator.",
+    "job_ids": []
+  },
+  "delivered_assets": [
+    {
+      "path": "assets/bg-prison.png",
+      "provider": "OpenAI built-in image_gen",
+      "mode": "built-in",
+      "dimensions": {
+        "width": 1672,
+        "height": 941
+      },
+      "prompt": "Create an extraordinary original environmental background illustration for a premium gothic 2D side scrolling roguelite videogame called VEILBOUND. LANDSCAPE panoramic 16:9. NO typography, NO logos, NO characters or living beings. A haunted underground prison cathedral with impossibly tall carved stone arches, ruined small stained glass windows, empty barred cells, broken colonnades at different distances, hanging iron chains, trailing burgundy vines, amber lanterns and tiny candles, floor haze and teal fog. Strictly side-view / orthographic stage-like composition, camera perpendicular to the wall, NO isometric perspective. Handcrafted painterly pixel art aesthetic, crisp chunky brush pixels, beautiful minute architectural texture and rich layered atmospheric depth, controlled blue-black and deep teal palette with amber gold pools of candlelight and very small burnt crimson accents. Background is an airy haunted vista with large negative spaces in center and lower third where foreground platforms and characters will later be composited. Lower third mostly translucent-looking teal shadow mist and softly discernible ruins. Moody, elegant, melancholic, dramatic lighting, award winning indie fantasy videogame environment art. Original architecture and visual identity, no imitation of any specific game."
+    },
+    {
+      "path": "assets/bg-cathedral.png",
+      "provider": "OpenAI built-in image_gen",
+      "mode": "built-in",
+      "dimensions": {
+        "width": 1672,
+        "height": 941
+      },
+      "prompt": "Create a stunning original environmental background illustration for a gothic 2D side scrolling roguelite videogame. LANDSCAPE panoramic 16:9. NO text, NO logos, NO characters, NO people or creatures. Boss arena in a ruined cathedral of the crimson eclipse: towering gothic arches and vaults recede into mist, enormous shattered circular rose window high in the center with red lunar light shining through it, scattered candles, ornate old stone carvings, torn burgundy banners, shattered sculptures WITHOUT human faces or bodies, intricate dark columns, drifting embers. Strict side-on orthographic game environment stage, not isometric. Painterly pixel art of exceptionally high craftsmanship, crisp chunky brush pixel shapes, detailed antique masonry, layered atmospheric depth. Palette deep blue black, desaturated oxblood red, dusty rose mist, amber gold flames and silver moonlight. Bottom third is unobstructed flat dark shadow and mist for compositing gameplay foreground platforms and characters. The composition is a majestic haunted chamber, powerful focal rose-window, richly textured but gameplay-readable. Premium original indie fantasy concept art."
+    },
+    {
+      "path": "assets/cover.png",
+      "provider": "OpenAI built-in image_gen",
+      "mode": "built-in",
+      "dimensions": {
+        "width": 1672,
+        "height": 941
+      },
+      "prompt": "Premium original fantasy videogame key art, 16:9 widescreen, NO words, NO lettering, NO logo or watermark. ONE adult female swordswoman, clearly a woman age 25, athletic elegant silhouette, white silver shoulder-length hair, crimson scarf whipping in wind and long crimson open coat over practical dark midnight leather armor, black trousers and tall boots, one slender glowing pale gold longsword held down by her side. Fully clothed, serious stoic expression, stylish profile, she stands on ruined stone at the RIGHT THIRD of composition looking toward the LEFT, full body visible. Left two thirds is an enormous breathtaking gothic city seen through broken arch, crumbling tall cathedral towers, bridges and prison ruins, teal fog, amber lit windows, burgundy vines, drifting gold sparks. No other characters or creatures anywhere. Painterly sophisticated pixel-art-inspired illustration, finely textured chunky brush pixels, strong 2D fantasy side-view game aesthetic, dramatic teal blue shadows and warm amber light with striking crimson accents, moonlit atmospheric depth, epic melancholic world, outstanding high craft original cover art. Compose left third mostly low contrast shadow fog and ruined skyline, empty enough for a title to be added separately."
+    }
+  ],
+  "validation": "All three delivered PNG assets inspected visually; gothic original world, no text or living characters in backgrounds; one adult female swordswoman on cover."
+}
