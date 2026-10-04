@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { W, H, FLOOR, MAP_CELL, ROOM_DEFS, DROP_RATES, WEAPONS, SKILLS, RARITIES, weaponFor, skillFor, switchWeapon, equipDrop, nearbyDrop, createRun, step, attack, jump, dash, skill, groundSlam, shatterAt, heal, interact, chooseBoon } from './engine.js';
+import { W, H, FLOOR, MAP_CELL, ROOM_DEFS, DROP_RATES, WEAPONS, SKILLS, RARITIES, weaponFor, skillFor, switchWeapon, equipDrop, nearbyDrop, shrineFor, buyShrine, vaultReady, createRun, step, attack, jump, dash, skill, groundSlam, shatterAt, heal, interact, chooseBoon } from './engine.js';
 
 const tick = (s, seconds, input = {}) => { for (let t = 0; t < seconds - 1e-9; t += 1 / 60) step(s, input, 1 / 60); };
 const fresh = () => createRun({ seed: 7 });
@@ -249,6 +249,29 @@ const armed = type => {
   return s;
 };
 {
+  for (const spec of WEAPONS) {
+    const s = armed(spec.id), p = s.player;
+    for (const prop of s.rooms[0].breakables) prop.broken = true;
+    s.rooms[0].terrainVersion++;
+    for (let combo = 1; combo <= 3; combo++) {
+      s.projectiles = []; s.hitStop = 0;
+      assert.ok(attack(s)); assert.equal(p.combo, combo);
+      assert.ok(p.attackContact > 0 && p.attackContact < 1, `${spec.id} exposes a normalized animation contact point`);
+      assert.ok(Math.abs(p.attackContact - p.attackPending.delay / p.attackDuration) < 1e-8, `${spec.id} contact metadata matches its actual combat startup`);
+      const startup = p.attackContact * p.attackDuration;
+      let remaining = startup - .001;
+      while (remaining > 1e-10) { const dt = Math.min(.01, remaining); step(s, {}, dt); remaining -= dt; }
+      assert.ok(p.attackPending, `${spec.id} combo ${combo} has not struck before its exposed contact point`);
+      step(s, {}, .002); assert.equal(p.attackPending, null, `${spec.id} combo ${combo} strikes at its exposed contact point`);
+      settledAttack(s);
+    }
+  }
+  const s = fresh(); quiet(s); const p = s.player;
+  assert.ok(jump(s)); const first = p.jumpStartedAt; assert.equal(first, s.time); tick(s, .15);
+  assert.ok(jump(s)); assert.equal(p.jumps, 2); assert.equal(p.jumpStartedAt, s.time); assert.ok(p.jumpStartedAt > first, 'an actual second jump starts its own timed somersault');
+  const second = p.jumpStartedAt; assert.equal(jump(s), false); assert.equal(p.jumpStartedAt, second, 'a rejected third jump does not restart the air animation');
+}
+{
   const s = armed('gauntlet'), close = target(s, 0, 255), far = target(s, 3, 390);
   assert.ok(attack(s)); assert.ok(s.player.attackDuration < .15); tick(s, .08);
   assert.ok(close.hp < 999); assert.equal(far.hp, 999, 'gauntlets trade reach for rapid hits');
@@ -419,6 +442,122 @@ const ability = id => { const s = fresh(); quiet(s); place(s, 180); s.player.ski
   assert.equal(items.filter(i => i.kind === 'gold').length, samples); assert.equal(items.filter(i => i.kind === 'ember').length, samples, 'a chest always releases currency loot');
   assert.ok(Math.abs(counts.weapon / samples - .1) < .035 && Math.abs(counts.skill / samples - .1) < .035, 'each hidden-chest equipment roll is ten percent');
 }
+
+// An avoided attack must actually collide with the dodge body. Empty rolls and
+// the ordinary grace period cannot farm a counterattack or a cooldown refund.
+const incoming = (s, damage = 20) => {
+  const p = s.player;
+  s.projectiles.push({ x: p.x + 15, y: p.y + 30, vx: 0, vy: 0, w: 22, h: 7, life: 1, kind: 'arrow', enemy: true, damage, color: '#dfa0b8' });
+};
+{
+  const s = fresh(); quiet(s); assert.ok(skill(s, 0)); assert.ok(dash(s)); incoming(s); incoming(s); step(s);
+  const p = s.player;
+  assert.equal(p.hp, p.maxHp); assert.ok(p.riposteReady && p.riposteTimer > 2.9);
+  assert.equal(s.events.filter(event => event === 'perfect').length, 1, 'two real projectiles during one dash award one perfect dodge');
+  assert.ok(Math.abs(p.cooldownsBySkill.crimson - (4.5 - .6 - 1 / 60)) < 1e-8, 'a perfect dodge refunds six tenths of a second');
+  tick(s, .25); s.projectiles = [];
+  assert.ok(switchWeapon(s, 1));
+  const ranged = target(s, 0, p.x - CORE_X + 100); assert.ok(attack(s)); tick(s, .11);
+  assert.equal(ranged.hp, 999 - Math.round(s.damage * .92), 'ranged fire does not gain the melee riposte bonus');
+  assert.ok(p.riposteReady, 'firing a ranged weapon preserves the counterattack');
+  settledAttack(s); ranged.dead = true;
+  assert.ok(switchWeapon(s, 0));
+  const melee = target(s, 0, p.x - CORE_X + 90); assert.ok(attack(s)); tick(s, .12);
+  assert.equal(melee.hp, 999 - Math.round(s.damage * 1.35), 'the next actual melee strike deals thirty-five percent more damage');
+  assert.equal(p.riposteReady, false); settledAttack(s);
+  p.combo = 0; p.comboWindow = 0; target(s, 0, p.x - CORE_X + 90); assert.ok(attack(s)); tick(s, .12);
+  assert.equal(melee.hp, 999 - s.damage, 'the bonus is consumed once');
+  const empty = fresh(); quiet(empty); dash(empty); tick(empty, .3); assert.equal(empty.player.riposteReady, false);
+  const passive = fresh(); quiet(passive); passive.player.invulnerable = .5; incoming(passive); step(passive);
+  assert.equal(passive.player.hp, passive.player.maxHp); assert.equal(passive.player.riposteReady, false, 'passive invulnerability gives no perfect reward');
+  const close = fresh(); quiet(close);
+  const foe = target(close, 0, close.player.x - CORE_X + 80);
+  Object.assign(foe, { phase: 'windup', intent: 'melee', timer: .001, facing: -1 });
+  dash(close); step(close); assert.ok(close.player.riposteReady, 'a real enemy melee collision also awards perfect dodge');
+  tick(close, 3.1); assert.equal(close.player.riposteReady, false, 'an unused counterattack expires');
+}
+{
+  const s = fresh(); quiet(s); incoming(s); step(s); const p = s.player;
+  assert.equal(p.hp, 100); assert.equal(p.rallyHP, 20); assert.equal(p.rallyTimer, 3);
+  tick(s, .3); const foe = target(s, 0, p.x - CORE_X + 90); p.facing = 1;
+  assert.ok(attack(s)); tick(s, .1);
+  assert.equal(p.hp, 106); assert.equal(p.rallyHP, 14, 'a real 36-damage strike recovers six HP from the lost segment');
+  assert.ok(skill(s, 1)); assert.equal(p.hp, 120); assert.equal(p.rallyHP, 0); assert.equal(p.rallyTimer, 0, 'large damage cannot heal beyond the recent wound');
+  foe.dead = true;
+  const expired = fresh(); quiet(expired); incoming(expired); step(expired); tick(expired, 3.1);
+  assert.equal(expired.player.hp, 100); assert.equal(expired.player.rallyHP, 0, 'expired damage stays lost');
+  expired.player.rallyHP = 20; expired.player.rallyTimer = 3; assert.ok(heal(expired)); assert.equal(expired.player.rallyHP, 0, 'using a flask clears the recoverable segment');
+  const fatal = fresh(); quiet(fatal); fatal.player.hp = 10; incoming(fatal); step(fatal);
+  assert.equal(fatal.mode, 'dead'); assert.equal(fatal.player.rallyHP, 0); assert.equal(fatal.player.riposteReady, false, 'death clears combat recovery');
+}
+{
+  const s = fresh(); quiet(s); const p = s.player, room = s.rooms[0];
+  room.items = [{ kind: 'gold', amount: 9, x: p.x + 130, y: p.y + 45, collected: false }, { kind: 'ember', amount: 2, x: p.x + 135, y: p.y + 45, collected: false }, { kind: 'sigil', amount: 1, x: p.x + 130, y: p.y + 45, collected: false }];
+  room.gearDrops = [{ id: 'magnet-gear', kind: 'weapon', type: 'spear', rarity: 'common', level: 1, x: p.x + 125, y: FLOOR - 44, w: 44, h: 44, vx: 0, vy: 0, onGround: true, collected: false }];
+  const keyX = room.items[2].x, gearX = room.gearDrops[0].x; tick(s, .5);
+  assert.equal(s.gold, 9); assert.equal(s.embers, 2);
+  assert.equal(room.items[2].x, keyX); assert.equal(room.items[2].collected, false, 'the magnet leaves distant sigils in place');
+  assert.equal(room.gearDrops[0].x, gearX); assert.equal(room.gearDrops[0].collected, false, 'the magnet never equips gear');
+  assert.ok(room.items.slice(0, 2).every(item => Math.abs(item.vx) <= 480 && Math.abs(item.vy) <= 480), 'currency velocity remains bounded');
+}
+{
+  const s = fresh(); quiet(s); const room = s.rooms[0], shrine = room.shrines[0], p = s.player;
+  assert.ok(shrine && shrine.cost === 80, 'the authored room has an eighty-gold forge');
+  placeAt(s, shrine.x - p.w / 2 + 130, shrine.y); s.gold = 80; assert.equal(buyShrine(s), false, 'a distant forge cannot be purchased');
+  placeAt(s, shrine.x - p.w / 2, shrine.y); s.gold = 79; assert.equal(buyShrine(s), false); assert.equal(shrine.used, false); assert.equal(s.gold, 79);
+  s.gold = 80; p.hp = 60; p.flask = 0; p.rallyHP = 20; p.rallyTimer = 3; const damage = s.damage;
+  assert.equal(shrineFor(s), shrine); assert.ok(interact(s));
+  assert.equal(s.gold, 0); assert.equal(s.damage, damage + 4); assert.equal(p.hp, 102); assert.equal(p.flask, 1); assert.equal(p.rallyHP, 0); assert.ok(shrine.used);
+  s.gold = 160; assert.equal(buyShrine(s), false); assert.equal(s.gold, 160, 'one forge cannot charge or reward twice');
+  const exit = ROOM_DEFS[0].exits[0]; room.cleared = true; placeAt(s, exit.x, exit.y + exit.h); assert.ok(interact(s));
+  const back = ROOM_DEFS[1].exits.find(gate => gate.target === 0); placeAt(s, back.x, back.y + back.h); assert.ok(interact(s));
+  placeAt(s, shrine.x - p.w / 2, shrine.y); assert.equal(s.rooms[0].shrines[0], shrine); assert.equal(buyShrine(s), false, 'a used forge stays spent after backtracking');
+  assert.equal(s.damage, damage + 4); assert.equal(s.rooms[1].shrines[0].used, false, 'a new biome has its own unused forge');
+}
+{
+  const s = fresh(), p = s.player, room = s.rooms[0];
+  for (const enemy of room.enemies) {
+    if (enemy.hordeZone !== 'west') { enemy.dead = true; enemy.hp = 0; }
+    else Object.assign(enemy, { speed: 0, timer: 999, phase: 'idle' });
+  }
+  placeAt(s, 180);
+  const soldiers = room.enemies.filter(enemy => enemy.hordeZone === 'west' && enemy.y + enemy.h === FLOOR).slice(0, 20);
+  soldiers.forEach((enemy, i) => Object.assign(enemy, { x: p.x + 90 + i * 7, y: FLOOR - enemy.h }));
+  assert.ok(skill(s, 0)); assert.ok(skill(s, 1));
+  assert.equal(s.kills, 20); assert.deepEqual(s.flow, { kills: 20, timer: 4, tier: 3 }, 'one actual group fight crosses all three flow thresholds');
+  assert.ok(Math.abs(p.cooldownsBySkill.crimson - .1) < 1e-8 && Math.abs(p.cooldownsBySkill.storm - 4.6) < 1e-8, 'real kills refund small tier-based amounts without resetting cooldowns');
+}
+{
+  const s = fresh(), p = s.player, room = s.rooms[0], vault = room.vaults.find(chest => chest.zone === 'west');
+  assert.ok(vault && vault.required === 24); assert.ok(room.chests.includes(vault));
+  for (const enemy of room.enemies) {
+    if (enemy.hordeZone !== 'west') { enemy.dead = true; enemy.hp = 0; }
+    else Object.assign(enemy, { speed: 0, timer: 999, phase: 'idle' });
+  }
+  placeAt(s, vault.x, vault.y + vault.h);
+  assert.equal(vaultReady(s, vault), false); assert.equal(interact(s), false); assert.equal(shatterAt(s, vault.x + 20, vault.y + 20), false, 'touch cannot bypass the combat seal');
+  assert.equal(vault.opened, false);
+  const soldiers = room.enemies.filter(enemy => enemy.hordeZone === 'west' && enemy.y + enemy.h === FLOOR);
+  assert.equal(soldiers.length, 24);
+  for (let batch = 0; batch < 3; batch++) {
+    if (batch) tick(s, 9.2);
+    for (let n = 0; n < 8; n++) Object.assign(soldiers[batch * 8 + n], { x: p.x + 90 + n * 16, y: FLOOR - soldiers[batch * 8 + n].h });
+    assert.ok(skill(s, 1)); assert.equal(s.kills, (batch + 1) * 8);
+    assert.equal(vaultReady(s, vault), batch === 2, 'only actual kills in the matching wing unlock the vault');
+    if (batch < 2) assert.equal(interact(s), false);
+  }
+  assert.ok(soldiers.every(enemy => enemy.dead && Number.isFinite(enemy.deathAt)), 'actual enemy deaths record their simulation time');
+  const deathTimes = soldiers.map(enemy => enemy.deathAt), damage = s.damage, gold = s.gold;
+  assert.ok(interact(s)); assert.ok(vault.opened); assert.equal(s.damage, damage + 5); tick(s, .6);
+  assert.equal(s.gold, gold + 60); assert.equal(s.embers, 3, 'the vault releases its fixed exploration currency');
+  interact(s); assert.equal(s.damage, damage + 5); assert.equal(s.gold, gold + 60, 'an opened vault cannot award its relic again');
+  assert.deepEqual(soldiers.map(enemy => enemy.deathAt), deathTimes, 'the death timestamp does not advance with the world');
+  tick(s, 4.1); assert.deepEqual(s.flow, { kills: 0, timer: 0, tier: 0 }, 'the kill flow expires after four seconds');
+  const exit = ROOM_DEFS[0].exits[0]; room.cleared = true; placeAt(s, exit.x, exit.y + exit.h); assert.ok(interact(s));
+  const back = ROOM_DEFS[1].exits.find(gate => gate.target === 0); placeAt(s, back.x, back.y + back.h); assert.ok(interact(s));
+  assert.ok(soldiers.every(enemy => enemy.dead)); assert.deepEqual(soldiers.map(enemy => enemy.deathAt), deathTimes, 'returning to a biome keeps original death times for the renderer');
+}
+console.log('Remake checks passed: perfect dodge, one-use melee riposte, rally recovery, currency magnet, persistent forge and combat-sealed vault.');
 
 // The full campaign uses live enemies and the same gestures/skills as the browser.
 // No teleporting, inflated stats, enemy disabling or direct HP changes on this route.

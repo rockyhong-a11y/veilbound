@@ -1,0 +1,113 @@
+{
+  "image": "boss.png",
+  "frameW": 352,
+  "frameH": 272,
+  "anchor": [
+    176,
+    228
+  ],
+  "animations": {
+    "idle": {
+      "frames": 8,
+      "fps": 7,
+      "loop": true,
+      "start": 0
+    },
+    "walk": {
+      "frames": 10,
+      "fps": 9,
+      "loop": true,
+      "start": 8
+    },
+    "slam": {
+      "frames": 14,
+      "fps": 12,
+      "loop": false,
+      "windup": 7,
+      "active": 2,
+      "recover": 5,
+      "start": 18
+    },
+    "sweep": {
+      "frames": 13,
+      "fps": 12,
+      "loop": false,
+      "windup": 6,
+      "active": 2,
+      "recover": 5,
+      "start": 32
+    },
+    "charge_windup": {
+      "frames": 8,
+      "fps": 10,
+      "loop": false,
+      "start": 45
+    },
+    "charge": {
+      "frames": 8,
+      "fps": 16,
+      "loop": true,
+      "start": 53
+    },
+    "crash": {
+      "frames": 12,
+      "fps": 8,
+      "loop": false,
+      "start": 61
+    },
+    "leap": {
+      "frames": 8,
+      "fps": 14,
+      "loop": false,
+      "start": 73
+    },
+    "leap_fall": {
+      "frames": 4,
+      "fps": 10,
+      "loop": true,
+      "start": 81
+    },
+    "leap_land": {
+      "frames": 10,
+      "fps": 12,
+      "loop": false,
+      "windup": 2,
+      "active": 2,
+      "recover": 6,
+      "start": 85
+    },
+    "roar": {
+      "frames": 12,
+      "fps": 8,
+      "loop": false,
+      "start": 95
+    },
+    "summon": {
+      "frames": 12,
+      "fps": 8,
+      "loop": false,
+      "start": 107,
+      "windup": 4,
+      "active": 5,
+      "recover": 3
+    },
+    "hurt": {
+      "frames": 4,
+      "fps": 14,
+      "loop": false,
+      "start": 119
+    },
+    "death": {
+      "frames": 18,
+      "fps": 6,
+      "loop": false,
+      "start": 123
+    }
+  },
+  "columns": 11,
+  "rows": 13,
+  "bodyHeightPx": 138,
+  "version": 5,
+  "source": "tools/remake-art/render_boss.py",
+  "provenance": "tools/remake-art/PROVENANCE.md"
+}

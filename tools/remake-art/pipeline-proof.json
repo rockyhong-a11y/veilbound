@@ -1,0 +1,223 @@
+{
+  "archer": {
+    "cells": 42,
+    "texture": [
+      1536,
+      560
+    ],
+    "bodyHeightPx": 59,
+    "nativeFrame": [
+      128,
+      112
+    ],
+    "anchor": [
+      64,
+      100
+    ],
+    "decodedBytes": 3440640
+  },
+  "boss": {
+    "cells": 141,
+    "texture": [
+      3872,
+      3536
+    ],
+    "bodyHeightPx": 138,
+    "nativeFrame": [
+      352,
+      272
+    ],
+    "anchor": [
+      176,
+      228
+    ],
+    "decodedBytes": 54765568
+  },
+  "duelist": {
+    "cells": 41,
+    "texture": [
+      1408,
+      560
+    ],
+    "bodyHeightPx": 58,
+    "nativeFrame": [
+      128,
+      112
+    ],
+    "anchor": [
+      64,
+      100
+    ],
+    "decodedBytes": 3153920
+  },
+  "heroine-bow": {
+    "cells": 72,
+    "texture": [
+      1280,
+      1344
+    ],
+    "bodyHeightPx": 57,
+    "nativeFrame": [
+      128,
+      112
+    ],
+    "anchor": [
+      64,
+      100
+    ],
+    "decodedBytes": 6881280
+  },
+  "heroine-gauntlet": {
+    "cells": 68,
+    "texture": [
+      1280,
+      1344
+    ],
+    "bodyHeightPx": 57,
+    "nativeFrame": [
+      128,
+      112
+    ],
+    "anchor": [
+      64,
+      100
+    ],
+    "decodedBytes": 6881280
+  },
+  "heroine-greatsword": {
+    "cells": 80,
+    "texture": [
+      1280,
+      1344
+    ],
+    "bodyHeightPx": 57,
+    "nativeFrame": [
+      128,
+      112
+    ],
+    "anchor": [
+      64,
+      100
+    ],
+    "decodedBytes": 6881280
+  },
+  "heroine-gun": {
+    "cells": 71,
+    "texture": [
+      1280,
+      1344
+    ],
+    "bodyHeightPx": 57,
+    "nativeFrame": [
+      128,
+      112
+    ],
+    "anchor": [
+      64,
+      100
+    ],
+    "decodedBytes": 6881280
+  },
+  "heroine-harpoon": {
+    "cells": 70,
+    "texture": [
+      1280,
+      1344
+    ],
+    "bodyHeightPx": 57,
+    "nativeFrame": [
+      128,
+      112
+    ],
+    "anchor": [
+      64,
+      100
+    ],
+    "decodedBytes": 6881280
+  },
+  "heroine-scythe": {
+    "cells": 73,
+    "texture": [
+      1280,
+      1344
+    ],
+    "bodyHeightPx": 57,
+    "nativeFrame": [
+      128,
+      112
+    ],
+    "anchor": [
+      64,
+      100
+    ],
+    "decodedBytes": 6881280
+  },
+  "heroine-spear": {
+    "cells": 70,
+    "texture": [
+      1280,
+      1344
+    ],
+    "bodyHeightPx": 57,
+    "nativeFrame": [
+      128,
+      112
+    ],
+    "anchor": [
+      64,
+      100
+    ],
+    "decodedBytes": 6881280
+  },
+  "heroine-sword": {
+    "cells": 73,
+    "texture": [
+      1280,
+      1344
+    ],
+    "bodyHeightPx": 57,
+    "nativeFrame": [
+      128,
+      112
+    ],
+    "anchor": [
+      64,
+      100
+    ],
+    "decodedBytes": 6881280
+  },
+  "lancer": {
+    "cells": 51,
+    "texture": [
+      1280,
+      784
+    ],
+    "bodyHeightPx": 76,
+    "nativeFrame": [
+      128,
+      112
+    ],
+    "anchor": [
+      64,
+      100
+    ],
+    "decodedBytes": 4014080
+  },
+  "warden": {
+    "cells": 46,
+    "texture": [
+      1536,
+      672
+    ],
+    "bodyHeightPx": 60,
+    "nativeFrame": [
+      128,
+      112
+    ],
+    "anchor": [
+      64,
+      100
+    ],
+    "decodedBytes": 4128768
+  }
+}

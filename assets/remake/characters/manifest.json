@@ -1,0 +1,69 @@
+{
+  "version": 5,
+  "frameW": 128,
+  "frameH": 112,
+  "anchor": [
+    64,
+    100
+  ],
+  "heroine": {
+    "sword": {
+      "image": "heroine-sword.png",
+      "metadata": "heroine-sword.json"
+    },
+    "gauntlet": {
+      "image": "heroine-gauntlet.png",
+      "metadata": "heroine-gauntlet.json"
+    },
+    "spear": {
+      "image": "heroine-spear.png",
+      "metadata": "heroine-spear.json"
+    },
+    "gun": {
+      "image": "heroine-gun.png",
+      "metadata": "heroine-gun.json"
+    },
+    "bow": {
+      "image": "heroine-bow.png",
+      "metadata": "heroine-bow.json"
+    },
+    "harpoon": {
+      "image": "heroine-harpoon.png",
+      "metadata": "heroine-harpoon.json"
+    },
+    "greatsword": {
+      "image": "heroine-greatsword.png",
+      "metadata": "heroine-greatsword.json"
+    },
+    "scythe": {
+      "image": "heroine-scythe.png",
+      "metadata": "heroine-scythe.json"
+    }
+  },
+  "enemies": {
+    "duelist": {
+      "image": "duelist.png",
+      "metadata": "duelist.json"
+    },
+    "archer": {
+      "image": "archer.png",
+      "metadata": "archer.json"
+    },
+    "warden": {
+      "image": "warden.png",
+      "metadata": "warden.json"
+    },
+    "boss": {
+      "image": "boss.png",
+      "metadata": "boss.json"
+    },
+    "lancer": {
+      "image": "lancer.png",
+      "metadata": "lancer.json"
+    }
+  },
+  "title": "title-heroine.png",
+  "portrait": "portrait.png",
+  "source": "tools/remake-art/PROVENANCE.md",
+  "inspectionSource": "tools/remake-art/motion-inspection.json"
+}

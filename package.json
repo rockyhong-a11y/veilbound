@@ -1,7 +1,7 @@
 {
   "name": "veilbound",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "node server.mjs", "build": "node build.mjs", "test": "node test.mjs" }
+  "scripts": { "dev": "node server.mjs", "build": "node build.mjs", "test": "node test.mjs && node art-test.mjs" }
 }

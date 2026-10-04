@@ -250,6 +250,11 @@ function expandRoom(def, index) {
       { id: 'west', name: '서쪽 소탕로', x: 0, y: 940, w: CORE_X, h: FLOOR - 940, entryX: CORE_X, entryY: FLOOR },
       { id: 'east', name: '동쪽 혈전 회랑', x: RIGHT_WING_X, y: 940, w: CORE_X, h: FLOOR - 940, entryX: RIGHT_WING_X, entryY: FLOOR },
     ],
+    shrines: [{ id: `ember-forge-${index}`, x: CORE_X + 285, y: FLOOR, cost: 80 }],
+    hordeVaults: [
+      { id: `west-vault-${index}`, zone: 'west', x: 80, y: FLOOR - 52, w: 68, h: 52, required: bossRoom ? 3 : 24, relic: 'blade', secret: true },
+      { id: `east-vault-${index}`, zone: 'east', x: W - 175, y: FLOOR - 52, w: 68, h: 52, required: bossRoom ? 3 : 24, relic: 'heart', secret: true },
+    ],
     routeHints: [...def.routeHints, '중앙 미로의 양옆에는 넓은 소탕 구역이 있습니다. 여러 적을 한 번에 베어내세요.'],
   };
   const west = wingEnemies('west', index), east = wingEnemies('east', index);

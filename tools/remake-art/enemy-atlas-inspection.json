@@ -1,0 +1,32 @@
+{
+  "duelist": {
+    "frames": 41,
+    "boundsIssues": [],
+    "minEdgeMarginPx": 11,
+    "bodyHeightPx": 58
+  },
+  "archer": {
+    "frames": 42,
+    "boundsIssues": [],
+    "minEdgeMarginPx": 10,
+    "bodyHeightPx": 59
+  },
+  "warden": {
+    "frames": 46,
+    "boundsIssues": [],
+    "minEdgeMarginPx": 10,
+    "bodyHeightPx": 60
+  },
+  "boss": {
+    "frames": 141,
+    "boundsIssues": [],
+    "minEdgeMarginPx": 11,
+    "bodyHeightPx": 138
+  },
+  "lancer": {
+    "frames": 51,
+    "boundsIssues": [],
+    "minEdgeMarginPx": 9,
+    "bodyHeightPx": 76
+  }
+}

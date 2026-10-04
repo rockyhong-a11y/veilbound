@@ -1,0 +1,10 @@
+{
+  "nativeSize": [
+    40,
+    46
+  ],
+  "source": "tools/remake-art/render_portrait.py",
+  "role": "HUD head and shoulders portrait",
+  "identity": "adult silver-haired heroine, teal armor and red scarf",
+  "forward": "+X"
+}

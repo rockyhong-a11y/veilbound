@@ -6,26 +6,23 @@
   <meta name="description" content="VEILBOUND — 죽음 너머의 여정. 460명의 적과 확장된 좌우 무쌍 회랑. 8종 무기·8종 스킬로 미로를 탐험하고 공허의 여왕에 도전하세요.">
   <meta property="og:title" content="VEILBOUND · 죽음 너머의 여정"><meta property="og:description" content="검을 들고, 운명을 다시 쓰세요. 무료 2D 로그라이트 액션 게임.">
   <meta property="og:type" content="website"><meta property="og:image" content="https://rockyhong-a11y.github.io/veilbound/assets/cover.png">
-  <title>VEILBOUND — 죽음 너머의 여정</title><link rel="icon" href="favicon.svg"><link rel="stylesheet" href="style.css?v=4">
+  <title>VEILBOUND — 죽음 너머의 여정</title><link rel="icon" href="favicon.svg"><link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
-<header class="site-header">
-  <a class="brand" href="./" aria-label="VEILBOUND 홈"><img src="favicon.svg" alt="" width="31" height="31"><span>VEILBOUND</span><i></i><small>A ROGUELITE ODYSSEY</small></a>
-  <nav aria-label="게임 설정"><span class="live-dot"></span><span class="header-note">당신의 다음 생이 기다립니다</span><button id="sound" class="icon-button" aria-label="소리 켜기" title="소리 켜기">♫</button><button id="fullscreen" class="icon-button" aria-label="전체 화면" title="전체 화면">⛶</button></nav>
-</header>
 <main>
 <section id="stage" class="stage" aria-label="VEILBOUND 게임">
   <canvas id="game" width="1600" height="900" tabindex="0" aria-label="2D 로그라이트 액션 게임. 방향키 이동, 스페이스 이중 점프, J 장착 무기로 공격, 1과 2 무기 선택, X 무기 교체, K 회피, R와 T 스킬, 아래 방향키 낙하 공격, E 상호작용, M 지도, Q 회복."></canvas>
-  <div class="grain" aria-hidden="true"></div><div class="vignette" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
   <div id="hud" class="hud hidden">
-    <div class="player-hud"><div class="portrait"><span>V</span></div><div class="vitals"><div class="vital-label"><span>아리아</span><small id="hp-value">100 / 100</small></div><div class="health-track"><div id="health-fill"></div></div><div class="vital-meta"><span id="flasks">회복 2 / 2</span><span id="gold">0 금화</span><span id="boon-count">축복 0</span></div></div></div>
+    <div class="player-hud"><div class="portrait"><img src="assets/remake/characters/portrait.png?v=5" alt=""></div><div class="vitals"><div class="vital-label"><span>아리아</span><small id="hp-value">100 / 100</small></div><div class="health-track"><div id="rally-fill"></div><div id="health-fill"></div></div><div class="vital-meta"><span id="flasks">회복 2 / 2</span><span id="gold">0 금화</span><span id="boon-count">축복 0</span></div></div></div>
     <div class="run-hud"><span id="room-label">잿빛 감옥</span><span id="timer">00:00</span><button id="pause" class="icon-button" aria-label="일시 정지">Ⅱ</button></div>
   </div>
+  <div id="combat-status" class="combat-status hidden"></div><div id="gesture-hint" class="gesture-hint hidden"><span>왼쪽 드래그 · 이동</span><span>오른쪽 터치 · 공격<br>↑ 점프 · ↔ 회피</span></div>
   <div id="map" class="map hidden" aria-label="탐색 지도"></div>
   <button id="minimap-button" class="minimap-button hidden" aria-label="탐험 지도 펼치기"><canvas id="minimap" width="320" height="160"></canvas><span>탐험 지도 <kbd>M</kbd></span></button>
   <div id="objective" class="objective hidden"><span>◆</span><small id="objective-label">봉인 열쇠를 찾으세요</small></div>
   <div id="arena-hud" class="arena-hud hidden"><small id="arena-name">서쪽 소탕로</small><strong><b id="arena-count">36 / 36</b><span> 남음</span></strong></div>
-  <div id="kill-chain" class="kill-chain hidden"><b id="chain-count">3</b><span>연속 격파</span></div>
+  <div id="kill-chain" class="kill-chain hidden"><b id="chain-count">3</b><span id="chain-label">연속 격파</span></div>
   <div id="boss-hud" class="boss-hud hidden"><div><span>THE VOID QUEEN</span><small id="boss-phase">공허의 여왕</small></div><div class="boss-track"><div id="boss-fill"></div></div></div>
   <div id="room-banner" class="room-banner"><small>01 · THE ASHEN CELLS</small><strong>잿빛 감옥</strong><span>재 속에서, 다시.</span></div>
   <div id="toast" class="toast" role="status"></div>
@@ -35,17 +32,17 @@
   <div id="skills" class="skills hidden"><button id="skill-0" class="skill-button" aria-label="첫 번째 스킬 사용"><span>⟐</span><small>혈월의 검기</small><i>R</i><b></b></button><button id="skill-1" class="skill-button" aria-label="두 번째 스킬 사용"><span>ϟ</span><small>공허의 폭풍</small><i>T</i><b></b></button></div>
   <div id="touch-ring" class="touch-ring hidden" aria-hidden="true"></div>
   <div id="menu" class="menu">
-    <div class="menu-content"><div class="eyebrow"><span></span> THE VEIL REMEMBERS</div><h1>VEIL<span>BOUND</span></h1><p class="tagline">죽음 너머의 여정</p><p class="description">무너진 왕국. 끝나지 않는 밤.<br>검을 들고, 당신의 운명을 다시 쓰세요.</p>
-    <button id="start" class="start-button" disabled><span id="start-label">왕국을 불러오는 중</span><span class="arrow">→</span></button><div class="menu-meta"><span>460명의 적 · 좌우 무쌍 회랑</span><i>·</i><span>여덟 무기 · 여덟 스킬</span></div>
+    <div class="menu-content"><div class="eyebrow">ASH • STEEL • REBIRTH</div><h1>VEIL<span>BOUND</span></h1><p class="tagline">죽음 너머의 여정</p><p class="description">재로 물든 왕국에서<br>당신의 다음 생을 시작하세요.</p>
+    <button id="start" class="start-button" disabled><span id="start-label">왕국을 불러오는 중</span><span class="arrow">→</span></button>
+    <div class="menu-actions"><button id="help">조작 안내</button><button id="settings">화면 설정</button></div>
     <div id="legacy" class="legacy hidden"><span>남겨진 불씨 <b id="embers">0</b></span><button id="upgrade">무기 강화 <small id="upgrade-cost">5 불씨</small></button></div>
-    <div class="touch-help">왼쪽 드래그 이동 · 오른쪽 터치 무기 공격<br>위로 점프 · 옆으로 회피 · 아래로 낙하 공격<br>두 번 터치로 첫 스킬 · 금이 간 벽과 상자는 터치로 파괴</div>
-    </div><div class="menu-caption"><span>ARIA, THE UNBROKEN</span><small>저주받은 왕국의 마지막 검</small></div><div class="chapter-mark"><span>CHAPTER I</span><strong>ASH & REBIRTH</strong></div>
+    <div class="menu-meta">6개 구역 · 460명의 적<br>8종 무기 · 8종 스킬 · 공허의 여왕</div>
+    </div><div class="menu-caption"><span>ARIA · THE UNBROKEN</span><small>저주받은 왕국의 마지막 검</small></div>
   </div>
+  <nav class="game-settings" aria-label="게임 설정"><button id="sound" class="icon-button" aria-label="소리 켜기" title="소리 켜기">♪</button><button id="fullscreen" class="icon-button" aria-label="전체 화면" title="전체 화면">⛶</button></nav>
   <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="modal-body"><small id="modal-eyebrow">THE VEIL REMEMBERS</small><h2 id="modal-title"></h2><p id="modal-description"></p><div id="modal-options"></div><button id="modal-action" class="start-button"><span>계속하기</span><span>→</span></button></div></div>
-  <div class="stage-corners" aria-hidden="true"></div>
+
 </section>
-<footer class="game-footer"><div class="controls desktop-controls"><span><kbd>A</kbd><kbd>D</kbd> 이동</span><span><kbd>SPACE</kbd> 이중 점프</span><span><kbd>J</kbd> 공격</span><span><kbd>K</kbd> 회피</span><span><kbd>1</kbd><kbd>2</kbd> 무기</span><span><kbd>R</kbd><kbd>T</kbd> 스킬</span><span><kbd>↓</kbd> 낙하</span><span><kbd>E</kbd> 탐색</span><span><kbd>M</kbd> 지도</span></div><div class="controls mobile-controls">왼쪽 이동 <span>·</span> 오른쪽 공격 <span>·</span> 위로 점프 <span>·</span> 아래로 낙하</div><span class="footer-sign">ASH, STEEL & SECRETS <i>◆</i></span></footer>
 </main>
-<div class="page-bottom"><span>01 / 06 <i>—</i> THE FORSAKEN KINGDOM</span><span>HEADPHONES RECOMMENDED</span></div>
-<script type="module" src="game.js?v=4"></script>
+<script type="module" src="game.js?v=5"></script>
 </body></html>
